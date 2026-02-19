@@ -8,7 +8,10 @@ const axios = require('axios');
 const { Server } = require('socket.io');
 
 const app = express();
-app.use(cors());
+// Allow specific origins from env or fall back to wildcard (dev)
+const rawOrigins = (process.env.CORS_ORIGIN || '*').split(',').map((s) => s.trim());
+const corsOrigin = rawOrigins.length === 1 && rawOrigins[0] === '*' ? '*' : rawOrigins;
+app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json());
 
 // Serve the built React app (web/dist) in production

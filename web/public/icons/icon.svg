@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="80" fill="#141414"/>
+  <rect width="512" height="512" rx="80" fill="url(#bg)"/>
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#1a1a3e"/>
+      <stop offset="100%" stop-color="#0a0a1a"/>
+    </radialGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+  <!-- Sound wave bars - equalizer style -->
+  <g filter="url(#glow)" opacity="0.95">
+    <!-- Bar 1 -->
+    <rect x="116" y="220" width="36" height="72" rx="18" fill="#1677ff"/>
+    <!-- Bar 2 -->
+    <rect x="168" y="168" width="36" height="176" rx="18" fill="#4096ff"/>
+    <!-- Bar 3 (tallest, center) -->
+    <rect x="220" y="136" width="36" height="240" rx="18" fill="#69b1ff"/>
+    <!-- Bar 4 -->
+    <rect x="272" y="168" width="36" height="176" rx="18" fill="#4096ff"/>
+    <!-- Bar 5 -->
+    <rect x="324" y="196" width="36" height="120" rx="18" fill="#1677ff"/>
+    <!-- Bar 6 -->
+    <rect x="376" y="220" width="36" height="72" rx="18" fill="#0958d9"/>
+  </g>
+  <!-- Subtle circular glow behind bars -->
+  <circle cx="256" cy="256" r="130" fill="none" stroke="#1677ff" stroke-width="1.5" opacity="0.15"/>
+</svg>

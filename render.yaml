@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: jamroom-server
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: CORS_ORIGIN
+        # After Netlify deploys, update this to your Netlify URL:
+        # e.g., https://jamroom-abc123.netlify.app
+        value: "*"

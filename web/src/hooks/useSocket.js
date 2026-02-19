@@ -3,11 +3,18 @@ import { io } from 'socket.io-client';
 
 /**
  * Custom hook that manages the Socket.IO connection and all room state.
- * Improvements:
+ *
+ * In development (Vite proxy): connects to same origin (VITE_SERVER_URL is empty).
+ * In production (Netlify → Render): connects to VITE_SERVER_URL (the Render backend URL).
+ *
+ * Robustness:
  * - joinRoom waits for 'connect' before emitting room:join (race-condition fix)
- * - error is cleared on successful room:state
- * - socket ref guards prevent emitting on null socket
+ * - Reconnection with long delays to survive Render.com cold starts (~15s)
+ * - connect_error shows a user-facing message
  */
+
+const SERVER_URL = import.meta.env.VITE_SERVER_URL; // undefined in dev = same origin
+
 export default function useSocket() {
   const socketRef = useRef(null);
   const [connected, setConnected] = useState(false);
@@ -17,7 +24,14 @@ export default function useSocket() {
   const [mySocketId, setMySocketId] = useState(null);
 
   useEffect(() => {
-    const socket = io({ autoConnect: false, reconnection: true, reconnectionAttempts: 5 });
+    const socket = io(SERVER_URL, {
+      autoConnect: false,
+      reconnection: true,
+      reconnectionAttempts: 12,
+      reconnectionDelay: 2000,      // 2s before first retry
+      reconnectionDelayMax: 15000,  // up to 15s between retries (handles Render cold start)
+      timeout: 20000
+    });
     socketRef.current = socket;
 
     socket.on('connect', () => {
@@ -37,7 +51,9 @@ export default function useSocket() {
       setChatMessages((prev) => [...prev.slice(-99), msg]);
     });
     socket.on('error:message', (e) => setError(e.message));
-    socket.on('connect_error', () => setError('Cannot connect to server. Please refresh.'));
+    socket.on('connect_error', () => {
+      setError('Server is starting up, please wait… (reconnecting automatically)');
+    });
 
     return () => {
       socket.disconnect();
