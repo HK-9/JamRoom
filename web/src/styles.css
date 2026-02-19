@@ -1,0 +1,107 @@
+/* ── JamRoom global styles ── */
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* dark theme overrides */
+body {
+  background: #141414;
+  color: #e0e0e0;
+}
+
+/* Ant overrides for dark feel */
+.ant-layout { background: #141414 !important; }
+.ant-layout-sider { background: #1f1f1f !important; }
+.ant-layout-header { background: #1f1f1f !important; }
+.ant-card { background: #1f1f1f !important; border-color: #303030 !important; }
+.ant-input, .ant-input-search .ant-input { background: #2a2a2a !important; border-color: #434343 !important; color: #e0e0e0 !important; }
+.ant-input::placeholder { color: #666 !important; }
+.ant-list-item { border-color: #303030 !important; }
+.ant-btn-default { background: #2a2a2a !important; border-color: #434343 !important; color: #e0e0e0 !important; }
+.ant-typography { color: #e0e0e0 !important; }
+.ant-divider { border-color: #303030 !important; }
+.ant-badge-status-text { color: #e0e0e0 !important; }
+.ant-tag { border-color: #434343 !important; }
+.ant-avatar { background: #1677ff !important; }
+.ant-slider-track { background: #1677ff !important; }
+.ant-slider-handle::after { border-color: #1677ff !important; }
+
+/* scrollable panels */
+.panel-scroll {
+  overflow-y: auto;
+  max-height: 100%;
+}
+.panel-scroll::-webkit-scrollbar { width: 6px; }
+.panel-scroll::-webkit-scrollbar-track { background: transparent; }
+.panel-scroll::-webkit-scrollbar-thumb { background: #434343; border-radius: 3px; }
+
+/* player bar */
+.player-bar {
+  background: #1a1a2e !important;
+  border-top: 1px solid #303030;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  height: 80px;
+  gap: 16px;
+}
+
+/* chat messages */
+.chat-msg {
+  padding: 6px 0;
+}
+.chat-msg-user {
+  font-weight: 600;
+  color: #1677ff;
+  margin-right: 8px;
+}
+.chat-msg-time {
+  font-size: 11px;
+  color: #666;
+  margin-left: 8px;
+}
+
+/* artwork thumbnail */
+.track-art {
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  object-fit: cover;
+  background: #2a2a2a;
+}
+
+/* join screen */
+.join-screen {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  background: linear-gradient(135deg, #0a0a1a 0%, #141428 50%, #0a0a1a 100%);
+}
+
+/* search result hover */
+.search-result-item:hover {
+  background: #2a2a2a;
+  border-radius: 8px;
+}
+
+/* active queue item */
+.queue-item-active {
+  background: rgba(22, 119, 255, 0.08);
+  border-radius: 8px;
+}
+
+/* hide SC widget iframe — use clip-rect to avoid autoplay-blocking */
+.sc-widget-hidden {
+  position: fixed;
+  left: -9999px;
+  top: -9999px;
+  width: 10px;
+  height: 10px;
+  border: 0;
+}

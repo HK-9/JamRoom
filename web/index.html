@@ -4,50 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>JamRoom</title>
-    <style>
-      body { font-family: Arial, sans-serif; margin: 20px; max-width: 960px; }
-      .row { display: flex; gap: 8px; margin-bottom: 12px; }
-      input, button { padding: 8px; }
-      .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-      ul { padding-left: 18px; }
-      .muted { color: #666; font-size: 12px; }
-    </style>
   </head>
   <body>
-    <h1>JamRoom (SoundCloud-powered planning MVP)</h1>
-    <div class="row">
-      <input id="name" placeholder="Your name" />
-      <input id="room" placeholder="Room ID" value="demo-room" />
-      <button id="joinBtn">Join Room</button>
-    </div>
-
-    <div class="row">
-      <input id="search" placeholder="Search SoundCloud tracks" style="flex:1" />
-      <button id="searchBtn">Search</button>
-      <button id="skipBtn">Host Skip</button>
-    </div>
-
-    <p id="status" class="muted">Not connected.</p>
-
-    <div class="columns">
-      <div>
-        <h3>Search Results</h3>
-        <ul id="results"></ul>
-        <h3>Queue</h3>
-        <ul id="queue"></ul>
-      </div>
-
-      <div>
-        <h3>Chat</h3>
-        <ul id="chat"></ul>
-        <div class="row">
-          <input id="chatInput" placeholder="Say something" style="flex:1" />
-          <button id="chatBtn">Send</button>
-        </div>
-      </div>
-    </div>
-
-    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
-    <script src="/app.js"></script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
