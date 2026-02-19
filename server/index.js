@@ -13,13 +13,15 @@ app.use(express.static('web'));
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] }
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
 });
 
 const rooms = new Map();
-const MAX_CHAT_MESSAGES = 150;
 
-function createRoom(roomId) {
+function makeInitialRoom(roomId) {
   return {
     roomId,
     hostId: null,
@@ -27,19 +29,12 @@ function createRoom(roomId) {
     queue: [],
     chat: [],
     playback: {
-      queueItemId: null,
+      trackId: null,
       state: 'paused',
       positionMs: 0,
       updatedAt: Date.now()
     }
   };
-}
-
-function getOrCreateRoom(roomId) {
-  if (!rooms.has(roomId)) {
-    rooms.set(roomId, createRoom(roomId));
-  }
-  return rooms.get(roomId);
 }
 
 function serializeRoom(room) {
@@ -53,47 +48,33 @@ function serializeRoom(room) {
   };
 }
 
-function roomNowPlaying(room) {
-  return room.queue.find((item) => item.id === room.playback.queueItemId) || room.queue[0] || null;
-}
-
-function syncPlaybackIfMissing(room) {
-  if (!room.playback.queueItemId && room.queue.length > 0) {
-    room.playback.queueItemId = room.queue[0].id;
-    room.playback.positionMs = 0;
-    room.playback.state = 'paused';
-    room.playback.updatedAt = Date.now();
-  }
-}
-
-function broadcastState(roomId) {
-  const room = rooms.get(roomId);
-  if (!room) return;
-  io.to(roomId).emit('room:state', { ...serializeRoom(room), nowPlaying: roomNowPlaying(room) });
-}
-
 app.get('/health', (_req, res) => {
   res.json({ ok: true, rooms: rooms.size });
 });
 
 app.get('/api/search', async (req, res) => {
-  const q = String(req.query.q || '').trim();
-  if (!q) {
+  const { q } = req.query;
+  if (!q || !String(q).trim()) {
     return res.status(400).json({ error: 'Missing query: q' });
   }
 
   const clientId = process.env.SOUNDCLOUD_CLIENT_ID;
   if (!clientId) {
-    return res.status(503).json({ error: 'SOUNDCLOUD_CLIENT_ID is not configured.' });
+    return res.status(503).json({
+      error: 'SOUNDCLOUD_CLIENT_ID is not configured. Add it to .env before using search.'
+    });
   }
 
   try {
     const response = await axios.get('https://api-v2.soundcloud.com/search/tracks', {
-      params: { q, client_id: clientId, limit: 20 },
-      timeout: 8000
+      params: {
+        q,
+        client_id: clientId,
+        limit: 20
+      }
     });
 
-    const tracks = (response.data.collection || []).map((track) => ({
+    const normalized = (response.data.collection || []).map((track) => ({
       provider: 'soundcloud',
       trackId: String(track.id),
       title: track.title,
@@ -103,9 +84,9 @@ app.get('/api/search', async (req, res) => {
       user: track.user?.username || 'Unknown artist'
     }));
 
-    return res.json({ tracks });
+    return res.json({ tracks: normalized });
   } catch (error) {
-    return res.status(502).json({
+    return res.status(500).json({
       error: 'SoundCloud search failed',
       detail: error.response?.data || error.message
     });
@@ -114,26 +95,25 @@ app.get('/api/search', async (req, res) => {
 
 io.on('connection', (socket) => {
   socket.on('room:join', ({ roomId, name }) => {
-    const normalizedRoomId = String(roomId || '').trim();
-    const normalizedName = String(name || '').trim();
-
-    if (!normalizedRoomId || !normalizedName) {
+    if (!roomId || !name) {
       socket.emit('error:message', { message: 'roomId and name are required.' });
       return;
     }
 
-    const room = getOrCreateRoom(normalizedRoomId);
-    socket.join(normalizedRoomId);
-    room.users.set(socket.id, { name: normalizedName, joinedAt: Date.now() });
+    const trimmedRoomId = String(roomId).trim();
+    const room = rooms.get(trimmedRoomId) || makeInitialRoom(trimmedRoomId);
+    if (!rooms.has(trimmedRoomId)) rooms.set(trimmedRoomId, room);
+
+    socket.join(trimmedRoomId);
+    room.users.set(socket.id, { name: String(name).trim() });
     if (!room.hostId) room.hostId = socket.id;
 
-    syncPlaybackIfMissing(room);
-    broadcastState(normalizedRoomId);
+    io.to(trimmedRoomId).emit('room:state', serializeRoom(room));
   });
 
   socket.on('queue:add', ({ roomId, track, addedBy }) => {
     const room = rooms.get(roomId);
-    if (!room || !track?.trackId || !track?.title) return;
+    if (!room || !track) return;
 
     const item = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -141,62 +121,57 @@ io.on('connection', (socket) => {
       track,
       createdAt: Date.now()
     };
-
     room.queue.push(item);
-    syncPlaybackIfMissing(room);
-    broadcastState(roomId);
+
+    if (!room.playback.trackId) {
+      room.playback.trackId = item.id;
+      room.playback.state = 'paused';
+      room.playback.positionMs = 0;
+      room.playback.updatedAt = Date.now();
+    }
+
+    io.to(roomId).emit('room:state', serializeRoom(room));
   });
 
   socket.on('queue:skip', ({ roomId }) => {
     const room = rooms.get(roomId);
-    if (!room || socket.id !== room.hostId || room.queue.length === 0) return;
+    if (!room || room.hostId !== socket.id || room.queue.length === 0) return;
 
-    const currentId = room.playback.queueItemId;
-    const currentIndex = room.queue.findIndex((item) => item.id === currentId);
-    if (currentIndex >= 0) {
-      room.queue.splice(currentIndex, 1);
-    } else {
-      room.queue.shift();
-    }
-
-    room.playback.queueItemId = room.queue[0]?.id || null;
+    room.queue.shift();
+    const next = room.queue[0];
+    room.playback.trackId = next ? next.id : null;
     room.playback.positionMs = 0;
     room.playback.state = 'paused';
     room.playback.updatedAt = Date.now();
 
-    broadcastState(roomId);
+    io.to(roomId).emit('room:state', serializeRoom(room));
   });
 
   socket.on('player:update', ({ roomId, state, positionMs }) => {
     const room = rooms.get(roomId);
-    if (!room || socket.id !== room.hostId) return;
+    if (!room || room.hostId !== socket.id) return;
 
-    if (state === 'playing' || state === 'paused') {
-      room.playback.state = state;
-    }
-    if (Number.isFinite(positionMs) && positionMs >= 0) {
-      room.playback.positionMs = positionMs;
-    }
+    room.playback.state = state || room.playback.state;
+    room.playback.positionMs = Number.isFinite(positionMs) ? positionMs : room.playback.positionMs;
     room.playback.updatedAt = Date.now();
 
-    broadcastState(roomId);
+    io.to(roomId).emit('room:state', serializeRoom(room));
   });
 
   socket.on('chat:send', ({ roomId, text }) => {
     const room = rooms.get(roomId);
     const user = room?.users.get(socket.id);
-    const normalizedText = String(text || '').trim();
-    if (!room || !user || !normalizedText) return;
+    if (!room || !user || !text?.trim()) return;
 
     const message = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       user: user.name,
-      text: normalizedText,
+      text: text.trim(),
       createdAt: Date.now()
     };
 
     room.chat.push(message);
-    room.chat = room.chat.slice(-MAX_CHAT_MESSAGES);
+    room.chat = room.chat.slice(-100);
 
     io.to(roomId).emit('chat:new', message);
   });
@@ -207,13 +182,14 @@ io.on('connection', (socket) => {
 
       room.users.delete(socket.id);
       if (room.hostId === socket.id) {
-        room.hostId = room.users.keys().next().value || null;
+        const nextHost = room.users.keys().next().value;
+        room.hostId = nextHost || null;
       }
 
       if (room.users.size === 0) {
         rooms.delete(roomId);
       } else {
-        broadcastState(roomId);
+        io.to(roomId).emit('room:state', serializeRoom(room));
       }
     }
   });

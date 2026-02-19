@@ -11,11 +11,10 @@
       .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
       ul { padding-left: 18px; }
       .muted { color: #666; font-size: 12px; }
-      .pill { background: #f0f0f0; border-radius: 14px; padding: 2px 8px; }
     </style>
   </head>
   <body>
-    <h1>JamRoom (SoundCloud-first MVP)</h1>
+    <h1>JamRoom (SoundCloud-powered planning MVP)</h1>
     <div class="row">
       <input id="name" placeholder="Your name" />
       <input id="room" placeholder="Room ID" value="demo-room" />
@@ -25,13 +24,10 @@
     <div class="row">
       <input id="search" placeholder="Search SoundCloud tracks" style="flex:1" />
       <button id="searchBtn">Search</button>
-      <button id="playBtn">Play</button>
-      <button id="pauseBtn">Pause</button>
-      <button id="skipBtn">Skip</button>
+      <button id="skipBtn">Host Skip</button>
     </div>
 
     <p id="status" class="muted">Not connected.</p>
-    <p id="nowPlaying" class="pill">Now playing: none</p>
 
     <div class="columns">
       <div>

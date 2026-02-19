@@ -5,15 +5,12 @@ JamRoom is a starter implementation for a **SoundCloud-first group listening roo
 - realtime rooms
 - shared queue
 - room chat
-- host controls (play/pause/skip + playback state updates)
+- host controls (skip + playback state updates)
 - web client and React Native starter client
 
-## What was improved
+## Why SoundCloud-first
 
-- safer defaults via `.gitignore` to avoid committing local secrets
-- better room state snapshots (`nowPlaying` included)
-- host-only playback control actions with explicit play/pause
-- mobile socket lifecycle fix to prevent stale listeners and reconnection issues
+This project is structured around SoundCloud metadata/search APIs and a provider-agnostic architecture so additional providers can be added later.
 
 ## Quick start (web + backend)
 
@@ -27,6 +24,7 @@ npm install
 
 ```bash
 cp .env.example .env
+# set SOUNDCLOUD_CLIENT_ID
 ```
 
 3. Run server:
