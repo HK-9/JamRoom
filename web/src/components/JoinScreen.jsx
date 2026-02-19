@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Card, Input, Button, Typography, Space, Divider } from 'antd';
+import { Card, Input, Button, Typography, Divider } from 'antd';
 import { SoundOutlined, UserOutlined, HomeOutlined } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
@@ -17,24 +17,24 @@ export default function JoinScreen({ onJoin }) {
   return (
     <div className="join-screen">
       <Card
+        className="w-full max-w-sm mx-4 sm:mx-0"
         style={{
-          width: 420,
           borderRadius: 16,
           background: '#1f1f1f',
           border: '1px solid #303030',
           boxShadow: '0 20px 60px rgba(0,0,0,0.5)'
         }}
       >
-        <Space direction="vertical" size="large" style={{ width: '100%', textAlign: 'center' }}>
+        <div className="flex flex-col items-center gap-4 sm:gap-6 text-center">
           <div>
-            <SoundOutlined style={{ fontSize: 48, color: '#1677ff' }} />
-            <Title level={2} style={{ margin: '12px 0 4px', color: '#fff' }}>
+            <SoundOutlined className="text-4xl sm:text-5xl text-blue-500" />
+            <Title level={2} className="!mt-3 !mb-1 !text-xl sm:!text-2xl" style={{ color: '#fff' }}>
               JamRoom
             </Title>
-            <Text type="secondary">Listen together in real-time</Text>
+            <Text type="secondary" className="text-sm sm:text-base">Listen together in real-time</Text>
           </div>
 
-          <Divider style={{ margin: '8px 0' }} />
+          <Divider style={{ margin: '0' }} />
 
           <Input
             size="large"
@@ -64,7 +64,7 @@ export default function JoinScreen({ onJoin }) {
           >
             Join Room
           </Button>
-        </Space>
+        </div>
       </Card>
     </div>
   );

@@ -14,25 +14,25 @@ export default function SearchPanel({ onSearch, results, loading, error, onAdd }
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="flex flex-col h-full">
       <Search
         placeholder="Search SoundCloud tracks..."
-        enterButton={<><SearchOutlined /> Search</>}
+        enterButton={<><SearchOutlined /> <span className="hidden sm:inline">Search</span></>}
         size="large"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onSearch={handleSearch}
         loading={loading}
-        style={{ marginBottom: 12 }}
+        className="mb-2 sm:mb-3"
       />
 
       {error && (
-        <Alert message={error} type="error" showIcon closable style={{ marginBottom: 12 }} />
+        <Alert message={error} type="error" showIcon closable className="mb-2 sm:mb-3" />
       )}
 
-      <div className="panel-scroll" style={{ flex: 1 }}>
+      <div className="panel-scroll flex-1">
         {loading && (
-          <div style={{ textAlign: 'center', padding: 40 }}>
+          <div className="text-center py-10">
             <Spin size="large" />
           </div>
         )}
@@ -49,8 +49,7 @@ export default function SearchPanel({ onSearch, results, loading, error, onAdd }
             dataSource={results}
             renderItem={(track) => (
               <List.Item
-                className="search-result-item"
-                style={{ padding: '8px 12px', cursor: 'pointer' }}
+                className="search-result-item !px-2 sm:!px-3 !py-2 cursor-pointer"
                 actions={[
                   <Button
                     key="add"
@@ -59,7 +58,7 @@ export default function SearchPanel({ onSearch, results, loading, error, onAdd }
                     icon={<PlusOutlined />}
                     onClick={() => onAdd(track)}
                   >
-                    Add
+                    <span className="hidden sm:inline">Add</span>
                   </Button>
                 ]}
               >
@@ -67,14 +66,14 @@ export default function SearchPanel({ onSearch, results, loading, error, onAdd }
                   avatar={
                     <Avatar
                       shape="square"
-                      size={48}
+                      size={40}
                       src={track.artworkUrl?.replace('-large', '-t200x200')}
-                      style={{ borderRadius: 6 }}
+                      className="!rounded-md"
                     />
                   }
-                  title={<Text style={{ color: '#e0e0e0' }}>{track.title}</Text>}
+                  title={<Text className="!text-sm truncate !text-gray-200">{track.title}</Text>}
                   description={
-                    <Text type="secondary" style={{ fontSize: 12 }}>
+                    <Text type="secondary" className="!text-xs">
                       {track.user} · {formatDuration(track.durationMs)}
                     </Text>
                   }

@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
-import { ConfigProvider, Layout, Typography, Tabs, Badge, Avatar, Tag, Space, Divider, Alert, theme } from 'antd';
 import {
-  SearchOutlined,
-  UnorderedListOutlined,
-  MessageOutlined,
-  UserOutlined,
-  CrownOutlined,
-  SoundOutlined
+  ConfigProvider, Typography, Tabs, Badge, Avatar, Tag, Space,
+  Divider, Alert, Button, Drawer, Input, Modal, theme
+} from 'antd';
+import {
+  SearchOutlined, UnorderedListOutlined, MessageOutlined,
+  UserOutlined, CrownOutlined, SoundOutlined, MenuOutlined,
+  LockOutlined, UnlockOutlined, CheckOutlined
 } from '@ant-design/icons';
 
-import JoinScreen from './components/JoinScreen';
+import LobbyScreen from './components/LobbyScreen';
+import PasswordModal from './components/PasswordModal';
 import SearchPanel from './components/SearchPanel';
 import QueuePanel from './components/QueuePanel';
 import ChatPanel from './components/ChatPanel';
@@ -17,57 +18,85 @@ import PlayerBar from './components/PlayerBar';
 import useSocket from './hooks/useSocket';
 import useSearch from './hooks/useSearch';
 
-const { Header, Sider, Content } = Layout;
 const { Title, Text } = Typography;
 
+const antTheme = {
+  algorithm: theme.darkAlgorithm,
+  token: { colorPrimary: '#1677ff', borderRadius: 8 }
+};
+
 export default function App() {
-  const [joined, setJoined] = useState(false);
+  /* ── Lobby state ── */
+  const [phase, setPhase] = useState('name');  // 'name' | 'lobby' | 'password' | 'room'
   const [userName, setUserName] = useState('');
+  const [pendingRoom, setPendingRoom] = useState(null); // room obj from lobby list
+  const [joinError, setJoinError] = useState('');
+  const [nameInput, setNameInput] = useState('');
+
+  /* ── Room state ── */
   const [roomId, setRoomId] = useState('');
   const [unreadChat, setUnreadChat] = useState(0);
   const [activeTab, setActiveTab] = useState('search');
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const {
-    connected,
-    roomState,
-    chatMessages,
-    error,
-    mySocketId,
-    isHost,
-    joinRoom,
-    addToQueue,
-    skipTrack,
-    updatePlayback,
-    sendChat
+    connected, roomState, chatMessages, error, mySocketId,
+    isHost, canControl, lobbyRooms,
+    createRoom, joinRoom, addToQueue, skipTrack,
+    updatePlayback, sendChat, setPermissions
   } = useSocket();
 
   const { results, loading, error: searchError, search } = useSearch();
 
-  const handleJoin = (rid, name) => {
-    setRoomId(rid);
+  /* ── Name entry → Lobby ── */
+  const handleNameSubmit = () => {
+    const name = nameInput.trim();
+    if (!name) return;
     setUserName(name);
-    joinRoom(rid, name);
-    setJoined(true);
+    setPhase('lobby');
   };
 
-  const handleAddTrack = (track) => {
-    addToQueue(roomId, track, userName);
+  /* ── Create room ── */
+  const handleCreate = async (name, password) => {
+    const { roomId: rid } = await createRoom(name, password);
+    // Auto-join as creator
+    await joinRoom(rid, userName, password);
+    setRoomId(rid);
+    setPhase('room');
   };
 
-  const handleSkip = () => {
-    skipTrack(roomId);
+  /* ── Click a lobbied room ── */
+  const handleJoinRequest = (room) => {
+    if (room.hasPassword) {
+      setPendingRoom(room);
+      setPhase('password');
+    } else {
+      doJoin(room.roomId, userName, '');
+    }
   };
 
-  const handlePlayPause = (state, positionMs) => {
-    updatePlayback(roomId, state, positionMs);
+  /* ── Password confirmed ── */
+  const handlePasswordConfirm = async (rid, name, password) => {
+    await doJoin(rid, name, password); // throws on wrong password
+    setPendingRoom(null);
   };
 
-  const handlePositionUpdate = (state, positionMs) => {
-    updatePlayback(roomId, state, positionMs);
-  };
+  async function doJoin(rid, name, password) {
+    setJoinError('');
+    await joinRoom(rid, name, password); // throws on error
+    setRoomId(rid);
+    setPhase('room');
+  }
 
-  const handleSendChat = (text) => {
-    sendChat(roomId, text);
+  /* ── Track actions ── */
+  const handleAddTrack = (track) => addToQueue(roomId, track, userName);
+  const handleSkip = () => skipTrack(roomId);
+  const handlePlayPause = (state, positionMs) => updatePlayback(roomId, state, positionMs);
+  const handlePositionUpdate = (state, pos) => updatePlayback(roomId, state, pos);
+  const handleSendChat = (text) => sendChat(roomId, text);
+  const handleTogglePermissions = () => {
+    if (!isHost) return;
+    setPermissions(roomId, !roomState?.settings?.allowMemberControl);
   };
 
   const handleTabChange = (key) => {
@@ -75,7 +104,6 @@ export default function App() {
     if (key === 'chat') setUnreadChat(0);
   };
 
-  // Track unread chat messages when not on chat tab
   const prevChatLen = React.useRef(chatMessages.length);
   React.useEffect(() => {
     if (activeTab !== 'chat' && chatMessages.length > prevChatLen.current) {
@@ -84,39 +112,137 @@ export default function App() {
     prevChatLen.current = chatMessages.length;
   }, [chatMessages, activeTab]);
 
-  // Find the currently playing queue item
   const currentItem = React.useMemo(() => {
     if (!roomState?.playback?.trackId || !roomState.queue) return null;
     return roomState.queue.find((item) => item.id === roomState.playback.trackId) || null;
   }, [roomState]);
 
-  if (!joined) {
+  /* ═══════════════════════════════════════════════════════ */
+  /*  PHASE: Name entry                                      */
+  /* ═══════════════════════════════════════════════════════ */
+  if (phase === 'name') {
     return (
-      <ConfigProvider theme={{ algorithm: theme.darkAlgorithm, token: { colorPrimary: '#1677ff', borderRadius: 8 } }}>
-        <JoinScreen onJoin={handleJoin} />
+      <ConfigProvider theme={antTheme}>
+        <div className="join-screen">
+          <div className="w-full max-w-sm mx-4">
+            <div className="text-center mb-6">
+              <SoundOutlined className="text-5xl text-blue-500" />
+              <Title level={2} className="!mt-3 !mb-1 !text-white">JamRoom</Title>
+              <Text type="secondary">Listen together in real-time</Text>
+            </div>
+            <div className="flex flex-col gap-3 bg-[#1f1f1f] rounded-2xl p-6 border border-[#303030] shadow-2xl">
+              <Text className="!text-gray-300 text-sm">What should we call you?</Text>
+              <Input
+                size="large"
+                prefix={<UserOutlined />}
+                placeholder="Your display name"
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                onPressEnter={handleNameSubmit}
+                autoFocus
+              />
+              <Button
+                type="primary"
+                size="large"
+                block
+                disabled={!nameInput.trim()}
+                onClick={handleNameSubmit}
+                style={{ height: 48, fontWeight: 600 }}
+              >
+                Continue →
+              </Button>
+            </div>
+          </div>
+        </div>
       </ConfigProvider>
     );
   }
 
+  /* ═══════════════════════════════════════════════════════ */
+  /*  PHASE: Lobby                                           */
+  /* ═══════════════════════════════════════════════════════ */
+  if (phase === 'lobby' || phase === 'password') {
+    return (
+      <ConfigProvider theme={antTheme}>
+        <>
+          <LobbyScreen
+            lobbyRooms={lobbyRooms}
+            loading={!connected}
+            onJoin={handleJoinRequest}
+            onCreate={handleCreate}
+          />
+          {phase === 'password' && pendingRoom && (
+            <PasswordModal
+              room={pendingRoom}
+              userName={userName}
+              onConfirm={handlePasswordConfirm}
+              onCancel={() => { setPendingRoom(null); setPhase('lobby'); }}
+            />
+          )}
+        </>
+      </ConfigProvider>
+    );
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  /*  PHASE: Room                                            */
+  /* ═══════════════════════════════════════════════════════ */
   const users = roomState?.users || [];
+  const allowMemberControl = roomState?.settings?.allowMemberControl ?? true;
+
+  const userList = (
+    <div>
+      {/* Permissions toggle — host only */}
+      {isHost && (
+        <div className="mb-3 px-1">
+          <Button
+            size="small"
+            type={allowMemberControl ? 'default' : 'primary'}
+            icon={allowMemberControl ? <UnlockOutlined /> : <LockOutlined />}
+            onClick={handleTogglePermissions}
+            className="w-full !text-xs"
+          >
+            {allowMemberControl ? 'Lock controls (host only)' : 'Unlock controls (everyone)'}
+          </Button>
+        </div>
+      )}
+      {!isHost && (
+        <div className="mb-3 px-1">
+          <Tag
+            icon={allowMemberControl ? <UnlockOutlined /> : <LockOutlined />}
+            color={allowMemberControl ? 'green' : 'orange'}
+            className="!text-xs w-full text-center justify-center"
+          >
+            {allowMemberControl ? 'Everyone can control playback' : 'Host controls only'}
+          </Tag>
+        </div>
+      )}
+      <Divider style={{ margin: '0 0 8px 0' }} />
+      <div className="panel-scroll" style={{ maxHeight: 'calc(100dvh - 260px)' }}>
+        {users.map((u) => (
+          <div
+            key={u.socketId}
+            className="flex items-center gap-2.5 py-2 px-1 rounded-lg"
+            style={{ background: u.socketId === mySocketId ? 'rgba(22,119,255,0.08)' : 'transparent' }}
+          >
+            <Avatar size="small" icon={<UserOutlined />} />
+            <Text className="flex-1 truncate !text-sm" style={{ color: '#e0e0e0' }}>{u.name}</Text>
+            {u.socketId === roomState?.hostId && (
+              <CrownOutlined style={{ color: '#faad14', fontSize: 13 }} />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   const tabItems = [
     {
       key: 'search',
-      label: (
-        <span>
-          <SearchOutlined /> Search
-        </span>
-      ),
+      label: <span><SearchOutlined /> <span className="hidden sm:inline">Search</span></span>,
       children: (
-        <div style={{ padding: 16, height: 'calc(100vh - 180px)' }}>
-          <SearchPanel
-            results={results}
-            loading={loading}
-            error={searchError}
-            onSearch={search}
-            onAdd={handleAddTrack}
-          />
+        <div className="p-2 sm:p-4 h-[calc(100dvh-10rem)] sm:h-[calc(100dvh-11rem)] overflow-y-auto">
+          <SearchPanel results={results} loading={loading} error={searchError} onSearch={search} onAdd={handleAddTrack} />
         </div>
       )
     },
@@ -124,24 +250,21 @@ export default function App() {
       key: 'queue',
       label: (
         <span>
-          <UnorderedListOutlined /> Queue
+          <UnorderedListOutlined /> <span className="hidden sm:inline">Queue</span>
           {roomState?.queue?.length > 0 && (
-            <Badge
-              count={roomState.queue.length}
-              size="small"
-              offset={[6, -2]}
-              style={{ backgroundColor: '#1677ff' }}
-            />
+            <Badge count={roomState.queue.length} size="small" offset={[6, -2]} style={{ backgroundColor: '#1677ff' }} />
           )}
         </span>
       ),
       children: (
-        <div style={{ padding: 16, height: 'calc(100vh - 180px)' }}>
+        <div className="p-2 sm:p-4 h-[calc(100dvh-10rem)] sm:h-[calc(100dvh-11rem)] overflow-y-auto">
           <QueuePanel
             queue={roomState?.queue || []}
             currentTrackId={roomState?.playback?.trackId}
             isHost={isHost}
+            canControl={canControl}
             onSkip={handleSkip}
+            onTogglePermissions={handleTogglePermissions}
           />
         </div>
       )
@@ -150,19 +273,14 @@ export default function App() {
       key: 'chat',
       label: (
         <span>
-          <MessageOutlined /> Chat
+          <MessageOutlined /> <span className="hidden sm:inline">Chat</span>
           {unreadChat > 0 && (
-            <Badge
-              count={unreadChat}
-              size="small"
-              offset={[6, -2]}
-              style={{ backgroundColor: '#52c41a' }}
-            />
+            <Badge count={unreadChat} size="small" offset={[6, -2]} style={{ backgroundColor: '#52c41a' }} />
           )}
         </span>
       ),
       children: (
-        <div style={{ padding: 16, height: 'calc(100vh - 180px)' }}>
+        <div className="p-2 sm:p-4 h-[calc(100dvh-10rem)] sm:h-[calc(100dvh-11rem)]">
           <ChatPanel messages={chatMessages} onSend={handleSendChat} />
         </div>
       )
@@ -170,102 +288,81 @@ export default function App() {
   ];
 
   return (
-    <ConfigProvider theme={{ algorithm: theme.darkAlgorithm, token: { colorPrimary: '#1677ff', borderRadius: 8 } }}>
-      <Layout style={{ height: '100vh' }}>
+    <ConfigProvider theme={antTheme}>
+      <div className="flex flex-col h-dvh bg-[#141414]">
+
         {/* Header */}
-        <Header
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '0 24px',
-            height: 56,
-            borderBottom: '1px solid #303030'
-          }}
-        >
-          <Space>
-            <SoundOutlined style={{ fontSize: 22, color: '#1677ff' }} />
-            <Title level={4} style={{ margin: 0, color: '#fff' }}>
-              JamRoom
-            </Title>
-            <Tag color="blue">{roomId}</Tag>
-          </Space>
-          <Space>
-            {isHost && <Tag icon={<CrownOutlined />} color="gold">Host</Tag>}
-            <Tag color={connected ? 'green' : 'red'}>
-              {connected ? 'Connected' : 'Disconnected'}
+        <header className="safe-top flex items-center justify-between px-3 sm:px-6 h-12 sm:h-14 bg-[#1f1f1f] border-b border-[#303030] shrink-0">
+          <div className="flex items-center gap-2">
+            <Button
+              type="text"
+              className="md:!hidden"
+              icon={<MenuOutlined style={{ color: '#fff', fontSize: 18 }} />}
+              onClick={() => setDrawerOpen(true)}
+            />
+            <SoundOutlined className="text-blue-500 text-lg" />
+            <span className="text-white font-bold text-base sm:text-lg">JamRoom</span>
+            <Tag color="blue" className="hidden sm:inline-flex max-w-[120px] truncate">
+              {roomState?.name || roomId}
             </Tag>
-            <Text style={{ color: '#999' }}>{userName}</Text>
-          </Space>
-        </Header>
+          </div>
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {isHost && <Tag icon={<CrownOutlined />} color="gold" className="!text-xs">Host</Tag>}
+            <Tag color={connected ? 'green' : 'red'} className="!text-xs">
+              {connected ? '●' : '○'}<span className="hidden sm:inline"> {connected ? 'Live' : 'Offline'}</span>
+            </Tag>
+            <span className="text-gray-400 text-xs sm:text-sm truncate max-w-[60px] sm:max-w-none">{userName}</span>
+          </div>
+        </header>
 
-        {/* Global socket error banner */}
-        {error && (
-          <Alert
-            message={error}
-            type="error"
-            showIcon
-            closable
-            banner
-            style={{ borderRadius: 0 }}
-          />
-        )}
+        {error && <Alert message={error} type="error" showIcon closable banner style={{ borderRadius: 0 }} />}
 
-        <Layout>
-          {/* Sidebar — Users */}
-          <Sider
-            width={220}
-            style={{ borderRight: '1px solid #303030', padding: '16px 12px' }}
-          >
+        <div className="flex flex-1 min-h-0">
+          {/* Desktop sidebar */}
+          <aside className="hidden md:flex flex-col w-52 lg:w-56 bg-[#1f1f1f] border-r border-[#303030] p-3 shrink-0">
             <Text strong style={{ color: '#999', textTransform: 'uppercase', fontSize: 11, letterSpacing: 1 }}>
               In Room — {users.length}
             </Text>
-            <Divider style={{ margin: '8px 0' }} />
-            <div className="panel-scroll" style={{ maxHeight: 'calc(100vh - 200px)' }}>
-              {users.map((u) => (
-                <div
-                  key={u.socketId}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    padding: '8px 4px',
-                    borderRadius: 8,
-                    background: u.socketId === mySocketId ? 'rgba(22,119,255,0.08)' : 'transparent'
-                  }}
-                >
-                  <Avatar size="small" icon={<UserOutlined />} />
-                  <Text style={{ color: '#e0e0e0', flex: 1 }}>{u.name}</Text>
-                  {u.socketId === roomState?.hostId && (
-                    <CrownOutlined style={{ color: '#faad14', fontSize: 14 }} />
-                  )}
-                </div>
-              ))}
-            </div>
-          </Sider>
+            <div className="mt-2">{userList}</div>
+          </aside>
 
-          {/* Main Content — Tabs */}
-          <Content style={{ overflow: 'hidden' }}>
+          {/* Mobile drawer */}
+          <Drawer
+            title={<span className="text-white">People in Room ({users.length})</span>}
+            placement="left"
+            onClose={() => setDrawerOpen(false)}
+            open={drawerOpen}
+            width={260}
+            styles={{
+              header: { background: '#1f1f1f', borderBottom: '1px solid #303030' },
+              body: { background: '#1f1f1f', padding: '12px' }
+            }}
+          >
+            {userList}
+          </Drawer>
+
+          <main className="flex-1 min-w-0 overflow-hidden">
             <Tabs
               activeKey={activeTab}
               onChange={handleTabChange}
               items={tabItems}
               style={{ height: '100%' }}
-              tabBarStyle={{ paddingLeft: 16, marginBottom: 0 }}
+              tabBarStyle={{ paddingLeft: 12, marginBottom: 0 }}
+              size="small"
             />
-          </Content>
-        </Layout>
+          </main>
+        </div>
 
-        {/* Player Bar */}
         <PlayerBar
           currentItem={currentItem}
           playbackState={roomState?.playback}
+          canControl={canControl}
           isHost={isHost}
           onPlayPause={handlePlayPause}
           onSkip={handleSkip}
           onPositionUpdate={handlePositionUpdate}
         />
-      </Layout>
+      </div>
     </ConfigProvider>
   );
 }

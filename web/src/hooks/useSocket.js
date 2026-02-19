@@ -1,19 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
 
-/**
- * Custom hook that manages the Socket.IO connection and all room state.
- *
- * In development (Vite proxy): connects to same origin (VITE_SERVER_URL is empty).
- * In production (Netlify → Render): connects to VITE_SERVER_URL (the Render backend URL).
- *
- * Robustness:
- * - joinRoom waits for 'connect' before emitting room:join (race-condition fix)
- * - Reconnection with long delays to survive Render.com cold starts (~15s)
- * - connect_error shows a user-facing message
- */
-
-const SERVER_URL = import.meta.env.VITE_SERVER_URL; // undefined in dev = same origin
+const SERVER_URL = import.meta.env.VITE_SERVER_URL;
+const API_BASE = import.meta.env.VITE_SERVER_URL || '';
 
 export default function useSocket() {
   const socketRef = useRef(null);
@@ -22,14 +11,23 @@ export default function useSocket() {
   const [chatMessages, setChatMessages] = useState([]);
   const [error, setError] = useState(null);
   const [mySocketId, setMySocketId] = useState(null);
+  const [lobbyRooms, setLobbyRooms] = useState([]);
+
+  // Fetch initial room list via REST (before socket lobby:update arrives)
+  useEffect(() => {
+    fetch(`${API_BASE}/api/rooms`)
+      .then((r) => r.json())
+      .then((d) => setLobbyRooms(d.rooms || []))
+      .catch(() => { });
+  }, []);
 
   useEffect(() => {
     const socket = io(SERVER_URL, {
       autoConnect: false,
       reconnection: true,
       reconnectionAttempts: 12,
-      reconnectionDelay: 2000,      // 2s before first retry
-      reconnectionDelayMax: 15000,  // up to 15s between retries (handles Render cold start)
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 15000,
       timeout: 20000
     });
     socketRef.current = socket;
@@ -39,40 +37,79 @@ export default function useSocket() {
       setMySocketId(socket.id);
       setError(null);
     });
+
     socket.on('disconnect', () => {
       setConnected(false);
       setMySocketId(null);
     });
-    socket.on('room:state', (state) => {
-      setRoomState(state);
-      setChatMessages(state.chat || []);
-    });
-    socket.on('chat:new', (msg) => {
-      setChatMessages((prev) => [...prev.slice(-99), msg]);
-    });
-    socket.on('error:message', (e) => setError(e.message));
+
     socket.on('connect_error', () => {
       setError('Server is starting up, please wait… (reconnecting automatically)');
     });
 
-    return () => {
-      socket.disconnect();
-    };
+    socket.on('room:state', (state) => {
+      setRoomState(state);
+      setChatMessages(state.chat || []);
+    });
+
+    socket.on('player:sync', ({ playback }) => {
+      setRoomState((prev) => prev ? { ...prev, playback } : prev);
+    });
+
+    socket.on('chat:new', (msg) => {
+      setChatMessages((prev) => [...prev.slice(-99), msg]);
+    });
+
+    socket.on('lobby:update', ({ rooms }) => {
+      setLobbyRooms(rooms || []);
+    });
+
+    socket.on('error:message', (e) => setError(e.message));
+
+    // Connect immediately so lobby:update starts arriving
+    socket.connect();
+
+    return () => { socket.disconnect(); };
   }, []);
 
-  const joinRoom = useCallback((roomId, name) => {
-    const socket = socketRef.current;
-    if (!socket) return;
-    setError(null);
+  /* ── Room actions ── */
 
-    const doJoin = () => socket.emit('room:join', { roomId, name });
+  const createRoom = useCallback((name, password) => {
+    return new Promise((resolve, reject) => {
+      const socket = socketRef.current;
+      if (!socket) return reject(new Error('Not connected'));
+      socket.once('room:created', resolve);
+      socket.once('room:create:error', ({ message }) => reject(new Error(message)));
+      socket.emit('room:create', { name, password: password || '' });
+    });
+  }, []);
 
-    if (socket.connected) {
-      doJoin();
-    } else {
-      socket.once('connect', doJoin);
-      socket.connect();
-    }
+  const joinRoom = useCallback((roomId, name, password) => {
+    return new Promise((resolve, reject) => {
+      const socket = socketRef.current;
+      if (!socket) return reject(new Error('Not connected'));
+      setError(null);
+
+      const onState = (state) => {
+        socket.off('room:join:error', onError);
+        resolve(state);
+      };
+      const onError = ({ message }) => {
+        socket.off('room:state', onState);
+        reject(new Error(message));
+      };
+
+      socket.once('room:state', onState);
+      socket.once('room:join:error', onError);
+
+      const doJoin = () => socket.emit('room:join', { roomId, name, password: password || '' });
+
+      if (socket.connected) {
+        doJoin();
+      } else {
+        socket.once('connect', doJoin);
+      }
+    });
   }, []);
 
   const addToQueue = useCallback((roomId, track, addedBy) => {
@@ -93,7 +130,12 @@ export default function useSocket() {
     socketRef.current?.emit('chat:send', { roomId, text: trimmed });
   }, []);
 
+  const setPermissions = useCallback((roomId, allowMemberControl) => {
+    socketRef.current?.emit('room:set-permissions', { roomId, allowMemberControl });
+  }, []);
+
   const isHost = !!(roomState?.hostId && mySocketId && roomState.hostId === mySocketId);
+  const canControl = isHost || !!roomState?.settings?.allowMemberControl;
 
   return {
     connected,
@@ -102,10 +144,14 @@ export default function useSocket() {
     error,
     mySocketId,
     isHost,
+    canControl,
+    lobbyRooms,
+    createRoom,
     joinRoom,
     addToQueue,
     skipTrack,
     updatePlayback,
-    sendChat
+    sendChat,
+    setPermissions
   };
 }

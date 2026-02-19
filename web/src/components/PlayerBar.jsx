@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Slider, Button, Typography, Space, Avatar } from 'antd';
+import { Slider, Button, Typography, Avatar } from 'antd';
 import {
   CaretRightOutlined,
   PauseOutlined,
@@ -9,20 +9,22 @@ import {
 } from '@ant-design/icons';
 
 const { Text } = Typography;
-
 const SC_WIDGET_URL = 'https://w.soundcloud.com/player/?url=';
 
 /**
- * PlayerBar uses the SoundCloud Widget API via a hidden iframe.
+ * PlayerBar
  *
- * Robustness improvements:
- * - Event bindings are unbound & rebound per track change (prevents stale closures)
- * - Volume ref ensures correct volume is set after widget loads
- * - Keyboard shortcut: Space to play/pause (host only)
+ * Props:
+ *   canControl — true if this user can play/pause/skip (host OR allowMemberControl)
+ *   isHost     — true only if this user is the room host
+ *
+ * "player:sync" from server is handled in useSocket → roomState.playback,
+ * so we watch playbackState to stay in sync with other members' actions.
  */
 export default function PlayerBar({
   currentItem,
   playbackState,
+  canControl,
   isHost,
   onPlayPause,
   onSkip,
@@ -37,127 +39,112 @@ export default function PlayerBar({
   const [isPlaying, setIsPlaying] = useState(false);
   const [scApiReady, setScApiReady] = useState(!!window.SC?.Widget);
   const loadedUrlRef = useRef(null);
-  const isHostRef = useRef(isHost);
+  const canControlRef = useRef(canControl);
   const onSkipRef = useRef(onSkip);
   const volumeRef = useRef(volume);
   const isMutedRef = useRef(isMuted);
 
-  // Keep refs in sync so event callbacks always see latest values
-  useEffect(() => { isHostRef.current = isHost; }, [isHost]);
+  useEffect(() => { canControlRef.current = canControl; }, [canControl]);
   useEffect(() => { onSkipRef.current = onSkip; }, [onSkip]);
   useEffect(() => { volumeRef.current = volume; }, [volume]);
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
 
-  // 1. Load the SoundCloud Widget API script once
+  // 1. Load SC Widget API
   useEffect(() => {
     if (window.SC?.Widget) { setScApiReady(true); return; }
-    const script = document.createElement('script');
-    script.src = 'https://w.soundcloud.com/player/api.js';
-    script.async = true;
-    script.onload = () => setScApiReady(true);
-    document.head.appendChild(script);
+    const s = document.createElement('script');
+    s.src = 'https://w.soundcloud.com/player/api.js';
+    s.async = true;
+    s.onload = () => setScApiReady(true);
+    document.head.appendChild(s);
   }, []);
 
-  // 2. When a new track appears, load it via the widget and rebind events
+  // 2. Load track when currentItem changes
   useEffect(() => {
-    if (!scApiReady || !iframeRef.current) return;
-    if (!currentItem?.track?.permalinkUrl) return;
-
+    if (!scApiReady || !iframeRef.current || !currentItem?.track?.permalinkUrl) return;
     const url = currentItem.track.permalinkUrl;
     if (loadedUrlRef.current === url) return;
     loadedUrlRef.current = url;
 
-    // Reset state
-    setPosition(0);
-    setDuration(0);
-    setIsPlaying(false);
+    setPosition(0); setDuration(0); setIsPlaying(false);
 
-    // Create widget if needed
     const widget = widgetRef.current || window.SC.Widget(iframeRef.current);
     widgetRef.current = widget;
+    const E = window.SC.Widget.Events;
 
-    const Events = window.SC.Widget.Events;
-
-    // Unbind previous events before rebinding
     try {
-      widget.unbind(Events.READY);
-      widget.unbind(Events.PLAY);
-      widget.unbind(Events.PAUSE);
-      widget.unbind(Events.PLAY_PROGRESS);
-      widget.unbind(Events.FINISH);
-    } catch (_) {
-      // ignore errors on first load
-    }
+      widget.unbind(E.READY); widget.unbind(E.PLAY); widget.unbind(E.PAUSE);
+      widget.unbind(E.PLAY_PROGRESS); widget.unbind(E.FINISH);
+    } catch (_) { }
 
     widget.load(url, {
-      auto_play: true,
-      show_artwork: false,
-      show_user: false,
-      buying: false,
-      sharing: false,
-      download: false,
-      show_playcount: false,
-      show_comments: false,
+      auto_play: true, show_artwork: false, show_user: false,
+      buying: false, sharing: false, download: false,
+      show_playcount: false, show_comments: false,
       callback: () => {
-        // Bind events fresh for this track
-        widget.bind(Events.READY, () => {
+        widget.bind(E.READY, () => {
           widget.getDuration((d) => { if (d > 0) setDuration(d); });
           widget.setVolume(isMutedRef.current ? 0 : volumeRef.current);
         });
-        widget.bind(Events.PLAY, () => setIsPlaying(true));
-        widget.bind(Events.PAUSE, () => setIsPlaying(false));
-        widget.bind(Events.PLAY_PROGRESS, (e) => {
-          setPosition(e.currentPosition);
-        });
-        widget.bind(Events.FINISH, () => {
+        widget.bind(E.PLAY, () => setIsPlaying(true));
+        widget.bind(E.PAUSE, () => setIsPlaying(false));
+        widget.bind(E.PLAY_PROGRESS, (e) => setPosition(e.currentPosition));
+        widget.bind(E.FINISH, () => {
           setIsPlaying(false);
-          if (isHostRef.current && onSkipRef.current) onSkipRef.current();
+          // Only the host auto-skips on finish to prevent N simultaneous skips
+          if (canControlRef.current && onSkipRef.current) onSkipRef.current();
         });
-
         widget.getDuration((d) => { if (d > 0) setDuration(d); });
         widget.setVolume(isMutedRef.current ? 0 : volumeRef.current);
         widget.play();
       }
     });
-  }, [scApiReady, currentItem]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scApiReady, currentItem]); // eslint-disable-line
 
-  // 3. Sync volume to widget whenever it changes
+  // 3. Sync when server playback state changes (from another member's action)
+  const lastSyncAt = useRef(0);
   useEffect(() => {
-    widgetRef.current?.setVolume(isMuted ? 0 : volume);
-  }, [volume, isMuted]);
+    if (!playbackState || !widgetRef.current) return;
+    const now = Date.now();
+    // Debounce: don't react to our own updates
+    if (now - lastSyncAt.current < 300) return;
+    lastSyncAt.current = now;
+
+    const widget = widgetRef.current;
+    if (playbackState.state === 'playing') {
+      widget.play();
+      if (Math.abs((playbackState.positionMs || 0) - position) > 2000) {
+        widget.seekTo(playbackState.positionMs || 0);
+      }
+    } else {
+      widget.pause();
+    }
+  }, [playbackState]); // eslint-disable-line
+
+  // 4. Volume sync
+  useEffect(() => { widgetRef.current?.setVolume(isMuted ? 0 : volume); }, [volume, isMuted]);
 
   const handlePlayPause = () => {
     const widget = widgetRef.current;
-    if (!widget) return;
-    if (isPlaying) {
-      widget.pause();
-    } else {
-      widget.play();
-    }
-    if (isHost && onPlayPause) {
-      onPlayPause(isPlaying ? 'paused' : 'playing', position);
-    }
+    if (!widget || !canControl) return;
+    if (isPlaying) widget.pause(); else widget.play();
+    if (onPlayPause) onPlayPause(isPlaying ? 'paused' : 'playing', position);
   };
 
   const handleSeek = (val) => {
+    if (!canControl) return;
     widgetRef.current?.seekTo(val);
     setPosition(val);
-    if (isHost && onPositionUpdate) {
-      onPositionUpdate('playing', val);
-    }
+    if (onPositionUpdate) onPositionUpdate('playing', val);
   };
 
-  const handleSkip = () => {
-    if (isHost && onSkip) onSkip();
-  };
-
+  const handleSkip = () => { if (canControl && onSkip) onSkip(); };
   const toggleMute = () => setIsMuted((m) => !m);
 
   const track = currentItem?.track;
 
   return (
-    <div className="player-bar">
-      {/* Hidden SoundCloud Widget iframe */}
+    <div className="safe-bottom bg-[#1a1a2e] border-t border-[#303030] px-2 sm:px-4 lg:px-6 flex items-center h-16 sm:h-20 gap-2 sm:gap-4 shrink-0">
       <iframe
         ref={iframeRef}
         className="sc-widget-hidden"
@@ -167,94 +154,77 @@ export default function PlayerBar({
       />
 
       {/* Track info */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 220 }}>
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0 shrink-0 sm:w-44 lg:w-56">
         {track?.artworkUrl ? (
-          <Avatar
-            shape="square"
-            size={48}
-            src={track.artworkUrl.replace('-large', '-t200x200')}
-            style={{ borderRadius: 8, flexShrink: 0 }}
-          />
+          <Avatar shape="square" size={40} src={track.artworkUrl.replace('-large', '-t200x200')} className="!rounded-lg shrink-0" />
         ) : (
-          <Avatar shape="square" size={48} icon={<SoundOutlined />} style={{ borderRadius: 8, flexShrink: 0 }} />
+          <Avatar shape="square" size={40} icon={<SoundOutlined />} className="!rounded-lg shrink-0" />
         )}
-        <div style={{ overflow: 'hidden' }}>
-          <Text strong ellipsis style={{ display: 'block', color: '#fff', maxWidth: 180 }}>
-            {track?.title || 'No track loaded'}
-          </Text>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {track?.user || '—'}
-          </Text>
+        <div className="min-w-0 hidden sm:block">
+          <Text strong ellipsis className="!block !text-white !text-sm">{track?.title || 'No track loaded'}</Text>
+          <Text type="secondary" className="!text-xs">{track?.user || '—'}</Text>
         </div>
       </div>
 
-      {/* Playback controls */}
-      <Space size="middle">
+      {/* Controls */}
+      <div className="flex items-center gap-1 shrink-0">
         <Button
-          type="text"
-          shape="circle"
-          size="large"
-          icon={isPlaying ? <PauseOutlined style={{ fontSize: 22, color: '#fff' }} /> : <CaretRightOutlined style={{ fontSize: 22, color: '#fff' }} />}
+          type="text" shape="circle" size="large"
+          icon={isPlaying
+            ? <PauseOutlined className="!text-lg sm:!text-xl" style={{ color: canControl ? '#fff' : '#555' }} />
+            : <CaretRightOutlined className="!text-lg sm:!text-xl" style={{ color: canControl ? '#fff' : '#555' }} />}
           onClick={handlePlayPause}
-          disabled={!track}
-          title={isPlaying ? 'Pause' : 'Play'}
+          disabled={!track || !canControl}
+          title={canControl ? (isPlaying ? 'Pause' : 'Play') : 'Host controls only'}
         />
         <Button
-          type="text"
-          shape="circle"
-          icon={<StepForwardOutlined style={{ fontSize: 18, color: isHost && track ? '#fff' : '#555' }} />}
+          type="text" shape="circle"
+          icon={<StepForwardOutlined style={{ fontSize: 16, color: canControl && track ? '#fff' : '#555' }} />}
           onClick={handleSkip}
-          disabled={!isHost || !track}
-          title={isHost ? 'Skip (host only)' : 'Only the host can skip'}
+          disabled={!track || !canControl}
+          title={canControl ? 'Skip' : 'Host controls only'}
         />
-      </Space>
-
-      {/* Progress */}
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10 }}>
-        <Text type="secondary" style={{ fontSize: 11, minWidth: 40, textAlign: 'right' }}>
-          {formatMs(position)}
-        </Text>
-        <Slider
-          min={0}
-          max={duration || 1}
-          value={position}
-          onChange={handleSeek}
-          disabled={!isHost || !track}
-          tooltip={{ formatter: (v) => formatMs(v) }}
-          style={{ flex: 1 }}
-        />
-        <Text type="secondary" style={{ fontSize: 11, minWidth: 40 }}>
-          {formatMs(duration)}
-        </Text>
       </div>
 
-      {/* Volume */}
-      <Space size="small" style={{ minWidth: 130 }}>
+      {/* Progress */}
+      <div className="flex-1 flex items-center gap-1.5 sm:gap-2 min-w-0">
+        <span className="text-[10px] sm:text-xs text-gray-400 w-8 sm:w-10 text-right shrink-0 hidden sm:block">
+          {formatMs(position)}
+        </span>
+        <Slider
+          min={0} max={duration || 1} value={position}
+          onChange={handleSeek}
+          disabled={!canControl || !track}
+          tooltip={{ formatter: (v) => formatMs(v) }}
+          className="flex-1"
+        />
+        <span className="text-[10px] sm:text-xs text-gray-400 w-8 sm:w-10 shrink-0 hidden sm:block">
+          {formatMs(duration)}
+        </span>
+      </div>
+
+      {/* Volume — desktop only */}
+      <div className="hidden lg:flex items-center gap-1 w-32 shrink-0">
         <Button
-          type="text"
-          shape="circle"
-          size="small"
-          icon={isMuted || volume === 0 ? <MutedOutlined style={{ color: '#999' }} /> : <SoundOutlined style={{ color: '#999' }} />}
+          type="text" shape="circle" size="small"
+          icon={isMuted || volume === 0
+            ? <MutedOutlined style={{ color: '#999' }} />
+            : <SoundOutlined style={{ color: '#999' }} />}
           onClick={toggleMute}
-          title={isMuted ? 'Unmute' : 'Mute'}
         />
         <Slider
-          min={0}
-          max={100}
-          value={isMuted ? 0 : volume}
+          min={0} max={100} value={isMuted ? 0 : volume}
           onChange={(v) => { setVolume(v); setIsMuted(false); }}
           tooltip={{ formatter: (v) => `${v}%` }}
-          style={{ width: 90 }}
+          className="flex-1"
         />
-      </Space>
+      </div>
     </div>
   );
 }
 
 function formatMs(ms) {
   if (!ms || ms < 0) return '0:00';
-  const totalSec = Math.floor(ms / 1000);
-  const min = Math.floor(totalSec / 60);
-  const sec = totalSec % 60;
-  return `${min}:${sec.toString().padStart(2, '0')}`;
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
 }

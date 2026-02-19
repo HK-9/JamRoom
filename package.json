@@ -9,7 +9,8 @@
     "dev:web": "cd web && node node_modules/vite/bin/vite.js",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:web\"",
     "build:web": "cd web && node node_modules/vite/bin/vite.js build",
-    "check": "node --check server/index.js"
+    "check": "node --check server/index.js",
+    "deploy": "node scripts/deploy.js"
   },
   "dependencies": {
     "axios": "^1.7.9",

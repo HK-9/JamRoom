@@ -4,74 +4,74 @@ import { DeleteOutlined, CaretRightOutlined, SoundOutlined } from '@ant-design/i
 
 const { Text } = Typography;
 
-export default function QueuePanel({ queue, currentTrackId, isHost, onSkip }) {
+/**
+ * QueuePanel
+ *
+ * Props:
+ *   canControl — true if this user can skip tracks
+ *   isHost     — true if user is host (only host sees the skip host controls option)
+ */
+export default function QueuePanel({ queue, currentTrackId, isHost, canControl, onSkip }) {
   if (!queue || queue.length === 0) {
     return (
       <Empty
         image={Empty.PRESENTED_IMAGE_SIMPLE}
         description="Queue is empty — search and add tracks!"
-        style={{ marginTop: 40 }}
+        className="!mt-10"
       />
     );
   }
 
   return (
-    <div className="panel-scroll" style={{ height: '100%' }}>
+    <div className="panel-scroll h-full">
       <List
         dataSource={queue}
-        renderItem={(item, index) => {
+        renderItem={(item) => {
           const isActive = item.id === currentTrackId;
           return (
             <List.Item
-              className={isActive ? 'queue-item-active' : ''}
-              style={{ padding: '10px 12px' }}
+              className={`${isActive ? 'queue-item-active' : ''} !px-2 sm:!px-3 !py-2`}
               actions={
-                isHost && isActive
+                isActive && canControl
                   ? [
-                      <Button
-                        key="skip"
-                        size="small"
-                        danger
-                        icon={<DeleteOutlined />}
-                        onClick={onSkip}
-                      >
-                        Skip
-                      </Button>
-                    ]
+                    <Button
+                      key="skip"
+                      size="small"
+                      danger
+                      icon={<DeleteOutlined />}
+                      onClick={onSkip}
+                    >
+                      <span className="hidden sm:inline">Skip</span>
+                    </Button>
+                  ]
                   : []
               }
             >
               <List.Item.Meta
                 avatar={
                   isActive ? (
-                    <Avatar
-                      size={40}
-                      icon={<SoundOutlined />}
-                      style={{ background: '#1677ff' }}
-                    />
+                    <Avatar size={40} icon={<SoundOutlined />} style={{ background: '#1677ff' }} />
                   ) : (
                     <Avatar
                       shape="square"
                       size={40}
                       src={item.track.artworkUrl?.replace('-large', '-t200x200')}
-                      style={{ borderRadius: 6 }}
+                      className="!rounded-md"
                     />
                   )
                 }
                 title={
-                  <Text style={{ color: isActive ? '#1677ff' : '#e0e0e0' }}>
-                    {isActive && <CaretRightOutlined style={{ marginRight: 6 }} />}
+                  <Text className="!text-sm truncate" style={{ color: isActive ? '#1677ff' : '#e0e0e0' }}>
+                    {isActive && <CaretRightOutlined className="mr-1" />}
                     {item.track.title}
                   </Text>
                 }
                 description={
-                  <span>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      {item.track.user} · Added by{' '}
+                  <span className="flex flex-wrap items-center gap-1">
+                    <Text type="secondary" className="!text-xs">
+                      {item.track.user} · Added by
                     </Text>
-                    <Tag color="blue" style={{ fontSize: 11 }}>
-                      {item.addedBy}
-                    </Tag>
+                    <Tag color="blue" className="!text-[11px]">{item.addedBy}</Tag>
                   </span>
                 }
               />
