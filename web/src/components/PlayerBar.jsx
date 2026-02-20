@@ -1,26 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Slider, Button, Typography, Avatar } from 'antd';
+import { Slider, Button, Typography, Avatar, Spin } from 'antd';
 import {
   CaretRightOutlined,
   PauseOutlined,
   StepForwardOutlined,
   SoundOutlined,
-  MutedOutlined
+  MutedOutlined,
+  LoadingOutlined
 } from '@ant-design/icons';
 
 const { Text } = Typography;
 const SC_WIDGET_URL = 'https://w.soundcloud.com/player/?url=';
 
-/**
- * PlayerBar
- *
- * Props:
- *   canControl — true if this user can play/pause/skip (host OR allowMemberControl)
- *   isHost     — true only if this user is the room host
- *
- * "player:sync" from server is handled in useSocket → roomState.playback,
- * so we watch playbackState to stay in sync with other members' actions.
- */
 export default function PlayerBar({
   currentItem,
   playbackState,
@@ -37,6 +28,7 @@ export default function PlayerBar({
   const [volume, setVolume] = useState(80);
   const [isMuted, setIsMuted] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);        // ← new
   const [scApiReady, setScApiReady] = useState(!!window.SC?.Widget);
   const loadedUrlRef = useRef(null);
   const canControlRef = useRef(canControl);
@@ -59,14 +51,17 @@ export default function PlayerBar({
     document.head.appendChild(s);
   }, []);
 
-  // 2. Load track when currentItem changes
+  // 2. Load track ONLY when the permalink URL actually changes
+  const currentUrl = currentItem?.track?.permalinkUrl;
   useEffect(() => {
-    if (!scApiReady || !iframeRef.current || !currentItem?.track?.permalinkUrl) return;
-    const url = currentItem.track.permalinkUrl;
-    if (loadedUrlRef.current === url) return;
-    loadedUrlRef.current = url;
+    if (!scApiReady || !iframeRef.current || !currentUrl) return;
+    if (loadedUrlRef.current === currentUrl) return;      // ← same track, skip
+    loadedUrlRef.current = currentUrl;
 
-    setPosition(0); setDuration(0); setIsPlaying(false);
+    setPosition(0);
+    setDuration(0);
+    setIsPlaying(false);
+    setIsLoading(true);                                    // ← show spinner
 
     const widget = widgetRef.current || window.SC.Widget(iframeRef.current);
     widgetRef.current = widget;
@@ -77,7 +72,7 @@ export default function PlayerBar({
       widget.unbind(E.PLAY_PROGRESS); widget.unbind(E.FINISH);
     } catch (_) { }
 
-    widget.load(url, {
+    widget.load(currentUrl, {
       auto_play: true, show_artwork: false, show_user: false,
       buying: false, sharing: false, download: false,
       show_playcount: false, show_comments: false,
@@ -85,13 +80,13 @@ export default function PlayerBar({
         widget.bind(E.READY, () => {
           widget.getDuration((d) => { if (d > 0) setDuration(d); });
           widget.setVolume(isMutedRef.current ? 0 : volumeRef.current);
+          setIsLoading(false);                             // ← loaded
         });
-        widget.bind(E.PLAY, () => setIsPlaying(true));
+        widget.bind(E.PLAY, () => { setIsPlaying(true); setIsLoading(false); });
         widget.bind(E.PAUSE, () => setIsPlaying(false));
         widget.bind(E.PLAY_PROGRESS, (e) => setPosition(e.currentPosition));
         widget.bind(E.FINISH, () => {
           setIsPlaying(false);
-          // Only the host auto-skips on finish to prevent N simultaneous skips
           if (canControlRef.current && onSkipRef.current) onSkipRef.current();
         });
         widget.getDuration((d) => { if (d > 0) setDuration(d); });
@@ -99,17 +94,29 @@ export default function PlayerBar({
         widget.play();
       }
     });
-  }, [scApiReady, currentItem]); // eslint-disable-line
+  }, [scApiReady, currentUrl]);    // ← depends on URL string, not object ref
 
-  // 3. Sync when server playback state changes (from another member's action)
-  const lastSyncAt = useRef(0);
+  // 3. Sync ONLY from player:sync events (not room:state)
+  //    playbackState changes come from both room:state & player:sync,
+  //    but we only care when the actual values change.
+  const lastSyncRef = useRef({ trackId: null, state: null, positionMs: 0, updatedAt: 0 });
   useEffect(() => {
     if (!playbackState || !widgetRef.current) return;
-    const now = Date.now();
-    // Debounce: don't react to our own updates
-    if (now - lastSyncAt.current < 300) return;
-    lastSyncAt.current = now;
+    const prev = lastSyncRef.current;
 
+    // Ignore if nothing meaningful changed
+    if (
+      prev.trackId === playbackState.trackId &&
+      prev.state === playbackState.state &&
+      prev.updatedAt === playbackState.updatedAt
+    ) return;
+
+    lastSyncRef.current = { ...playbackState };
+
+    // If the track changed, the load effect above handles it
+    if (prev.trackId !== playbackState.trackId) return;
+
+    // Same track — sync play/pause/seek
     const widget = widgetRef.current;
     if (playbackState.state === 'playing') {
       widget.play();
@@ -126,22 +133,23 @@ export default function PlayerBar({
 
   const handlePlayPause = () => {
     const widget = widgetRef.current;
-    if (!widget || !canControl) return;
+    if (!widget || !canControl || isLoading) return;
     if (isPlaying) widget.pause(); else widget.play();
     if (onPlayPause) onPlayPause(isPlaying ? 'paused' : 'playing', position);
   };
 
   const handleSeek = (val) => {
-    if (!canControl) return;
+    if (!canControl || isLoading) return;
     widgetRef.current?.seekTo(val);
     setPosition(val);
     if (onPositionUpdate) onPositionUpdate('playing', val);
   };
 
-  const handleSkip = () => { if (canControl && onSkip) onSkip(); };
+  const handleSkip = () => { if (canControl && !isLoading && onSkip) onSkip(); };
   const toggleMute = () => setIsMuted((m) => !m);
 
   const track = currentItem?.track;
+  const loadingIcon = <LoadingOutlined style={{ fontSize: 20, color: '#1677ff' }} spin />;
 
   return (
     <div className="safe-bottom bg-[#1a1a2e] border-t border-[#303030] px-2 sm:px-4 lg:px-6 flex items-center h-16 sm:h-20 gap-2 sm:gap-4 shrink-0">
@@ -168,20 +176,26 @@ export default function PlayerBar({
 
       {/* Controls */}
       <div className="flex items-center gap-1 shrink-0">
-        <Button
-          type="text" shape="circle" size="large"
-          icon={isPlaying
-            ? <PauseOutlined className="!text-lg sm:!text-xl" style={{ color: canControl ? '#fff' : '#555' }} />
-            : <CaretRightOutlined className="!text-lg sm:!text-xl" style={{ color: canControl ? '#fff' : '#555' }} />}
-          onClick={handlePlayPause}
-          disabled={!track || !canControl}
-          title={canControl ? (isPlaying ? 'Pause' : 'Play') : 'Host controls only'}
-        />
+        {isLoading ? (
+          <div className="w-10 h-10 flex items-center justify-center">
+            <Spin indicator={loadingIcon} />
+          </div>
+        ) : (
+          <Button
+            type="text" shape="circle" size="large"
+            icon={isPlaying
+              ? <PauseOutlined className="!text-lg sm:!text-xl" style={{ color: canControl ? '#fff' : '#555' }} />
+              : <CaretRightOutlined className="!text-lg sm:!text-xl" style={{ color: canControl ? '#fff' : '#555' }} />}
+            onClick={handlePlayPause}
+            disabled={!track || !canControl}
+            title={canControl ? (isPlaying ? 'Pause' : 'Play') : 'Host controls only'}
+          />
+        )}
         <Button
           type="text" shape="circle"
-          icon={<StepForwardOutlined style={{ fontSize: 16, color: canControl && track ? '#fff' : '#555' }} />}
+          icon={<StepForwardOutlined style={{ fontSize: 16, color: canControl && track && !isLoading ? '#fff' : '#555' }} />}
           onClick={handleSkip}
-          disabled={!track || !canControl}
+          disabled={!track || !canControl || isLoading}
           title={canControl ? 'Skip' : 'Host controls only'}
         />
       </div>
@@ -194,7 +208,7 @@ export default function PlayerBar({
         <Slider
           min={0} max={duration || 1} value={position}
           onChange={handleSeek}
-          disabled={!canControl || !track}
+          disabled={!canControl || !track || isLoading}
           tooltip={{ formatter: (v) => formatMs(v) }}
           className="flex-1"
         />

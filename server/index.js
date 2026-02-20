@@ -276,20 +276,63 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('room:state', serializeRoom(room));
   });
 
-  // ── Skip ──────────────────────────────────────────────────────────────────
+  // ── Skip (advance to next track, keep current in queue) ────────────────────
   socket.on('queue:skip', ({ roomId }) => {
     if (!validId(roomId)) return;
     const room = rooms.get(roomId);
     if (!room || !canControl(room, socket.id)) return;
 
-    room.queue.shift();
-    const next = room.queue[0];
+    const curIdx = room.queue.findIndex(i => i.id === room.playback.trackId);
+    const next = room.queue[curIdx + 1];
     room.playback = {
       trackId: next ? next.id : null,
       positionMs: 0,
       state: next ? 'playing' : 'paused',
       updatedAt: Date.now()
     };
+    io.to(roomId).emit('room:state', serializeRoom(room));
+  });
+
+  // ── Play specific track from queue ─────────────────────────────────────────
+  socket.on('queue:play', ({ roomId, trackItemId }) => {
+    if (!validId(roomId)) return;
+    const room = rooms.get(roomId);
+    if (!room || !canControl(room, socket.id)) return;
+
+    const item = room.queue.find(i => i.id === trackItemId);
+    if (!item) return;
+
+    room.playback = {
+      trackId: item.id,
+      positionMs: 0,
+      state: 'playing',
+      updatedAt: Date.now()
+    };
+    io.to(roomId).emit('room:state', serializeRoom(room));
+  });
+
+  // ── Remove track from queue ────────────────────────────────────────────────
+  socket.on('queue:remove', ({ roomId, trackItemId }) => {
+    if (!validId(roomId)) return;
+    const room = rooms.get(roomId);
+    if (!room) return;
+    // Any member can remove
+    const idx = room.queue.findIndex(i => i.id === trackItemId);
+    if (idx === -1) return;
+
+    const wasPlaying = room.playback.trackId === trackItemId;
+    room.queue.splice(idx, 1);
+
+    // If we removed the currently playing track, advance to next
+    if (wasPlaying) {
+      const next = room.queue[idx] || room.queue[idx - 1];
+      room.playback = {
+        trackId: next ? next.id : null,
+        positionMs: 0,
+        state: next ? 'playing' : 'paused',
+        updatedAt: Date.now()
+      };
+    }
     io.to(roomId).emit('room:state', serializeRoom(room));
   });
 

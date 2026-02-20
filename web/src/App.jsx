@@ -42,7 +42,7 @@ export default function App() {
   const {
     connected, roomState, chatMessages, error, mySocketId,
     isHost, canControl, lobbyRooms,
-    createRoom, joinRoom, addToQueue, skipTrack,
+    createRoom, joinRoom, addToQueue, skipTrack, playTrack, removeFromQueue,
     updatePlayback, sendChat, setPermissions
   } = useSocket();
 
@@ -112,10 +112,12 @@ export default function App() {
     prevChatLen.current = chatMessages.length;
   }, [chatMessages, activeTab]);
 
+  const playbackTrackId = roomState?.playback?.trackId;
+  const queue = roomState?.queue;
   const currentItem = React.useMemo(() => {
-    if (!roomState?.playback?.trackId || !roomState.queue) return null;
-    return roomState.queue.find((item) => item.id === roomState.playback.trackId) || null;
-  }, [roomState]);
+    if (!playbackTrackId || !queue) return null;
+    return queue.find((item) => item.id === playbackTrackId) || null;
+  }, [playbackTrackId, queue]);
 
   /* ═══════════════════════════════════════════════════════ */
   /*  PHASE: Name entry                                      */
@@ -264,7 +266,8 @@ export default function App() {
             isHost={isHost}
             canControl={canControl}
             onSkip={handleSkip}
-            onTogglePermissions={handleTogglePermissions}
+            onPlay={(trackItemId) => playTrack(roomId, trackItemId)}
+            onRemove={(trackItemId) => removeFromQueue(roomId, trackItemId)}
           />
         </div>
       )

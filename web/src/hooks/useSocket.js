@@ -120,6 +120,14 @@ export default function useSocket() {
     socketRef.current?.emit('queue:skip', { roomId });
   }, []);
 
+  const playTrack = useCallback((roomId, trackItemId) => {
+    socketRef.current?.emit('queue:play', { roomId, trackItemId });
+  }, []);
+
+  const removeFromQueue = useCallback((roomId, trackItemId) => {
+    socketRef.current?.emit('queue:remove', { roomId, trackItemId });
+  }, []);
+
   const updatePlayback = useCallback((roomId, state, positionMs) => {
     socketRef.current?.emit('player:update', { roomId, state, positionMs });
   }, []);
@@ -150,6 +158,8 @@ export default function useSocket() {
     joinRoom,
     addToQueue,
     skipTrack,
+    playTrack,
+    removeFromQueue,
     updatePlayback,
     sendChat,
     setPermissions
