@@ -100,7 +100,7 @@ export default function QueuePanel({ queue, currentTrackId, canControl, onPlay, 
                 }
                 title={
                   <Text
-                    className="!text-sm truncate cursor-pointer hover:!text-blue-400 transition-colors"
+                    className="!block !text-sm truncate cursor-pointer hover:!text-blue-400 transition-colors"
                     style={{ color: isActive ? '#1677ff' : '#e0e0e0' }}
                     onClick={() => canControl && !isActive && onPlay?.(item.id)}
                   >
@@ -109,8 +109,8 @@ export default function QueuePanel({ queue, currentTrackId, canControl, onPlay, 
                   </Text>
                 }
                 description={
-                  <span className="flex flex-wrap items-center gap-1">
-                    <Text type="secondary" className="!text-xs">
+                  <span className="flex items-center gap-1 overflow-hidden">
+                    <Text type="secondary" className="!text-xs truncate">
                       {item.track.user} · Added by
                     </Text>
                     <Tag color="blue" className="!text-[11px]">{item.addedBy}</Tag>

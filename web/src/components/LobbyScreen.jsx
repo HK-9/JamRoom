@@ -50,31 +50,36 @@ export default function LobbyScreen({ lobbyRooms, loading, onJoin, onCreate }) {
                     bodyStyle={{ padding: '20px 24px' }}
                 >
                     {/* Tab switcher */}
-                    <div className="flex gap-2 mb-4">
-                        <Button
-                            type={view === 'browse' ? 'primary' : 'default'}
-                            icon={<TeamOutlined />}
-                            onClick={() => setView('browse')}
-                            className="flex-1"
-                        >
-                            Browse Rooms
-                        </Button>
-                        <Button
-                            type={view === 'create' ? 'primary' : 'default'}
-                            icon={<PlusOutlined />}
-                            onClick={() => setView('create')}
-                            className="flex-1"
-                        >
-                            Create Room
-                        </Button>
-                    </div>
+                    {loading ? <Text className='flex justify-center animate-pulse' type="secondary">Patience unlocked. Almost there..</Text>
+                        : <div className="flex gap-2 mb-4">
+                            <Button
+                                type={view === 'browse' ? 'primary' : 'default'}
+                                icon={<TeamOutlined />}
+                                onClick={() => setView('browse')}
+                                className="flex-1"
+                            >
+                                Browse Rooms
+                            </Button>
+                            <Button
+                                type={view === 'create' ? 'primary' : 'default'}
+                                icon={<PlusOutlined />}
+                                onClick={() => setView('create')}
+                                className="flex-1"
+                            >
+                                Create Room
+                            </Button>
+                        </div>
+                    }
+
 
                     {/* ── Browse ── */}
                     {view === 'browse' && (
                         <div>
                             {loading ? (
-                                <div className="text-center py-8">
-                                    <Spin />
+                                <div className='flex flex-col'>
+                                    <div className="text-center py-8">
+                                        <Spin />
+                                    </div>
                                 </div>
                             ) : lobbyRooms.length === 0 ? (
                                 <Empty

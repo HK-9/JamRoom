@@ -71,9 +71,9 @@ export default function SearchPanel({ onSearch, results, loading, error, onAdd }
                       className="!rounded-md"
                     />
                   }
-                  title={<Text className="!text-sm truncate !text-gray-200">{track.title}</Text>}
+                  title={<Text className="!block !text-sm truncate !text-gray-200">{track.title}</Text>}
                   description={
-                    <Text type="secondary" className="!text-xs">
+                    <Text type="secondary" className="!block !text-xs truncate">
                       {track.user} · {formatDuration(track.durationMs)}
                     </Text>
                   }

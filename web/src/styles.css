@@ -50,6 +50,15 @@ body {
   border-color: #303030 !important;
 }
 
+/* Fix overlap of list text with action buttons */
+.ant-list-item-meta {
+  min-width: 0;
+}
+
+.ant-list-item-meta-content {
+  min-width: 0;
+}
+
 .ant-btn-default {
   background: #2a2a2a !important;
   border-color: #434343 !important;

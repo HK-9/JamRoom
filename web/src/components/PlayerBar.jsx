@@ -217,8 +217,8 @@ export default function PlayerBar({
         </span>
       </div>
 
-      {/* Volume — desktop only */}
-      <div className="hidden lg:flex items-center gap-1 w-32 shrink-0">
+      {/* Volume controls */}
+      <div className="flex items-center gap-1 w-20 sm:w-32 shrink-0">
         <Button
           type="text" shape="circle" size="small"
           icon={isMuted || volume === 0
