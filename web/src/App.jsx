@@ -46,7 +46,7 @@ export default function App() {
   const {
     connected, roomState, chatMessages, error, mySocketId,
     isHost, canControl, lobbyRooms,
-    createRoom, joinRoom, addToQueue, skipTrack, playTrack, removeFromQueue,
+    createRoom, joinRoom, setActiveRoom, addToQueue, skipTrack, playTrack, removeFromQueue,
     updatePlayback, sendChat, setPermissions
   } = useSocket(notify);
 
@@ -66,6 +66,7 @@ export default function App() {
     // Auto-join as creator
     await joinRoom(rid, userName, password);
     setRoomId(rid);
+    setActiveRoom(rid, userName);
     setPhase('room');
   };
 
@@ -89,6 +90,7 @@ export default function App() {
     setJoinError('');
     await joinRoom(rid, name, password); // throws on error
     setRoomId(rid);
+    setActiveRoom(rid, name);
     setPhase('room');
   }
 

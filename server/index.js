@@ -84,7 +84,10 @@ function makeRoom(roomId, name, passwordHash, hostId) {
       state: 'paused',
       positionMs: 0,
       updatedAt: Date.now()
-    }
+    },
+    // Grace period support
+    destroyTimer: null,                      // setTimeout id for delayed room cleanup
+    disconnectedUsers: new Map()             // name → { disconnectedAt, wasHost }
   };
 }
 
@@ -111,6 +114,8 @@ function publicRoomList() {
     allowMemberControl: r.settings.allowMemberControl
   }));
 }
+
+const ROOM_GRACE_PERIOD_MS = 2 * 60 * 1000; // 2 minutes
 
 /* ─── Input helpers ─── */
 function sanitize(str, max = 200) {
@@ -242,6 +247,47 @@ io.on('connection', (socket) => {
     socket.join(trimId);
     room.users.set(socket.id, { name: trimName });
     if (!room.hostId) room.hostId = socket.id;
+
+    // Cancel any pending room destruction
+    if (room.destroyTimer) {
+      clearTimeout(room.destroyTimer);
+      room.destroyTimer = null;
+    }
+    // Remove from disconnected tracking if rejoining
+    room.disconnectedUsers.delete(trimName);
+
+    io.to(trimId).emit('room:state', serializeRoom(room));
+    io.emit('lobby:update', { rooms: publicRoomList() });
+  });
+
+  // ── Rejoin room (after socket reconnection) ──────────────────────────────
+  socket.on('room:rejoin', ({ roomId, name }) => {
+    if (!validId(roomId) || !validId(name)) return;
+    const trimId = roomId.trim();
+    const trimName = sanitize(name, 50);
+
+    const room = rooms.get(trimId);
+    if (!room) {
+      socket.emit('room:join:error', { message: 'Room no longer exists.' });
+      return;
+    }
+
+    socket.join(trimId);
+    room.users.set(socket.id, { name: trimName });
+
+    // Restore host if they were the original host
+    const dcInfo = room.disconnectedUsers.get(trimName);
+    if (dcInfo?.wasHost) {
+      room.hostId = socket.id;
+    }
+    if (!room.hostId) room.hostId = socket.id;
+
+    // Cancel any pending room destruction
+    if (room.destroyTimer) {
+      clearTimeout(room.destroyTimer);
+      room.destroyTimer = null;
+    }
+    room.disconnectedUsers.delete(trimName);
 
     io.to(trimId).emit('room:state', serializeRoom(room));
     io.emit('lobby:update', { rooms: publicRoomList() });
@@ -396,14 +442,36 @@ io.on('connection', (socket) => {
     for (const [roomId, room] of rooms.entries()) {
       if (!room.users.has(socket.id)) continue;
 
+      const userName = room.users.get(socket.id)?.name;
+      const wasHost = room.hostId === socket.id;
       room.users.delete(socket.id);
-      if (room.hostId === socket.id) {
+
+      // Track disconnected user so they can rejoin
+      if (userName) {
+        room.disconnectedUsers.set(userName, {
+          disconnectedAt: Date.now(),
+          wasHost
+        });
+      }
+
+      // Reassign host to next connected user (if any)
+      if (wasHost) {
         room.hostId = room.users.keys().next().value || null;
       }
 
       if (room.users.size === 0) {
-        rooms.delete(roomId);
-        console.log(`Room ${roomId} closed.`);
+        // Start grace period — keep room alive for 2 minutes
+        if (!room.destroyTimer) {
+          room.destroyTimer = setTimeout(() => {
+            // Only destroy if still empty
+            if (room.users.size === 0) {
+              rooms.delete(roomId);
+              console.log(`Room ${roomId} closed (grace period expired).`);
+              io.emit('lobby:update', { rooms: publicRoomList() });
+            }
+          }, ROOM_GRACE_PERIOD_MS);
+          console.log(`Room ${roomId} empty — grace period started (${ROOM_GRACE_PERIOD_MS / 1000}s).`);
+        }
       } else {
         io.to(roomId).emit('room:state', serializeRoom(room));
       }

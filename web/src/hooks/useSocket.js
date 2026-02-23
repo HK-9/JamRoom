@@ -15,6 +15,8 @@ export default function useSocket(notify) {
   const notifyRef = useRef(notify);
   const prevUsersRef = useRef(0);
   const prevQueueRef = useRef(0);
+  const activeRoomRef = useRef(null);   // { roomId, userName } for auto-rejoin
+  const wasInRoomRef = useRef(false);   // tracks if we were in a room before disconnect
 
   useEffect(() => { notifyRef.current = notify; }, [notify]);
 
@@ -41,11 +43,20 @@ export default function useSocket(notify) {
       setConnected(true);
       setMySocketId(socket.id);
       setError(null);
+
+      // Auto-rejoin room after reconnection
+      const active = activeRoomRef.current;
+      if (active && wasInRoomRef.current) {
+        socket.emit('room:rejoin', { roomId: active.roomId, name: active.userName });
+      }
     });
 
     socket.on('disconnect', () => {
       setConnected(false);
-      setMySocketId(null);
+      // Don't clear mySocketId or roomState so UI stays intact during brief disconnect
+      if (activeRoomRef.current) {
+        wasInRoomRef.current = true;
+      }
     });
 
     socket.on('connect_error', () => {
@@ -139,6 +150,12 @@ export default function useSocket(notify) {
     });
   }, []);
 
+  // Track active room for auto-rejoin
+  const setActiveRoom = useCallback((roomId, userName) => {
+    activeRoomRef.current = roomId ? { roomId, userName } : null;
+    wasInRoomRef.current = false;
+  }, []);
+
   const addToQueue = useCallback((roomId, track, addedBy) => {
     socketRef.current?.emit('queue:add', { roomId, track, addedBy });
   }, []);
@@ -183,6 +200,7 @@ export default function useSocket(notify) {
     lobbyRooms,
     createRoom,
     joinRoom,
+    setActiveRoom,
     addToQueue,
     skipTrack,
     playTrack,

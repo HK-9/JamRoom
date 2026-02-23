@@ -84,7 +84,12 @@ export default function PlayerBar({
         widget.bind(E.READY, () => {
           widget.getDuration((d) => { if (d > 0) setDuration(d); });
           widget.setVolume(isMutedRef.current ? 0 : volumeRef.current);
-          setIsLoading(false);                             // ← loaded
+          setIsLoading(false);
+          // Auto-play if room says playing (handles initial join + track switch)
+          const ps = playbackStateRef.current;
+          if (ps?.state === 'playing') {
+            widget.play();
+          }
         });
         widget.bind(E.PLAY, () => { setIsPlaying(true); setIsLoading(false); });
         widget.bind(E.PAUSE, () => setIsPlaying(false));
@@ -117,9 +122,8 @@ export default function PlayerBar({
 
     lastSyncRef.current = { ...playbackState };
 
-    // If the track changed AND this is NOT the initial join, the load effect handles it
-    // On initial join (prev.trackId === null), we still need to sync play state
-    if (prev.trackId !== playbackState.trackId && prev.trackId !== null) return;
+    // If the track changed, the load effect above handles it (auto_play + READY handler)
+    if (prev.trackId !== playbackState.trackId) return;
 
     // Same track — sync play/pause/seek
     const widget = widgetRef.current;
