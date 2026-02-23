@@ -4,7 +4,7 @@ import { io } from 'socket.io-client';
 const SERVER_URL = import.meta.env.VITE_SERVER_URL;
 const API_BASE = import.meta.env.VITE_SERVER_URL || '';
 
-export default function useSocket() {
+export default function useSocket(notify) {
   const socketRef = useRef(null);
   const [connected, setConnected] = useState(false);
   const [roomState, setRoomState] = useState(null);
@@ -12,6 +12,11 @@ export default function useSocket() {
   const [error, setError] = useState(null);
   const [mySocketId, setMySocketId] = useState(null);
   const [lobbyRooms, setLobbyRooms] = useState([]);
+  const notifyRef = useRef(notify);
+  const prevUsersRef = useRef(0);
+  const prevQueueRef = useRef(0);
+
+  useEffect(() => { notifyRef.current = notify; }, [notify]);
 
   // Fetch initial room list via REST (before socket lobby:update arrives)
   useEffect(() => {
@@ -48,7 +53,29 @@ export default function useSocket() {
     });
 
     socket.on('room:state', (state) => {
-      setRoomState(state);
+      setRoomState((prev) => {
+        const fn = notifyRef.current;
+        if (fn && prev) {
+          // Detect new user joining
+          const prevUsers = prev.users || [];
+          const newUsers = state.users || [];
+          if (newUsers.length > prevUsers.length) {
+            const prevIds = new Set(prevUsers.map(u => u.socketId));
+            const joined = newUsers.filter(u => !prevIds.has(u.socketId));
+            joined.forEach(u => fn('JamRoom', `${u.name} joined the room`));
+          }
+          // Detect new track added to queue
+          const prevQueue = prev.queue || [];
+          const newQueue = state.queue || [];
+          if (newQueue.length > prevQueue.length) {
+            const lastTrack = newQueue[newQueue.length - 1];
+            if (lastTrack?.track?.title) {
+              fn('New track added', `${lastTrack.track.title}`, lastTrack.track.artworkUrl || undefined);
+            }
+          }
+        }
+        return state;
+      });
       setChatMessages(state.chat || []);
     });
 

@@ -35,11 +35,15 @@ export default function PlayerBar({
   const onSkipRef = useRef(onSkip);
   const volumeRef = useRef(volume);
   const isMutedRef = useRef(isMuted);
+  const playbackStateRef = useRef(playbackState);
+  const isPlayingRef = useRef(isPlaying);
 
   useEffect(() => { canControlRef.current = canControl; }, [canControl]);
   useEffect(() => { onSkipRef.current = onSkip; }, [onSkip]);
   useEffect(() => { volumeRef.current = volume; }, [volume]);
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
+  useEffect(() => { playbackStateRef.current = playbackState; }, [playbackState]);
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
 
   // 1. Load SC Widget API
   useEffect(() => {
@@ -113,8 +117,9 @@ export default function PlayerBar({
 
     lastSyncRef.current = { ...playbackState };
 
-    // If the track changed, the load effect above handles it
-    if (prev.trackId !== playbackState.trackId) return;
+    // If the track changed AND this is NOT the initial join, the load effect handles it
+    // On initial join (prev.trackId === null), we still need to sync play state
+    if (prev.trackId !== playbackState.trackId && prev.trackId !== null) return;
 
     // Same track — sync play/pause/seek
     const widget = widgetRef.current;
@@ -130,6 +135,67 @@ export default function PlayerBar({
 
   // 4. Volume sync
   useEffect(() => { widgetRef.current?.setVolume(isMuted ? 0 : volume); }, [volume, isMuted]);
+
+  // 5. Media Session API — lock screen / notification shade controls
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    const track = currentItem?.track;
+    if (track) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: track.title || 'Unknown Track',
+        artist: track.user || 'Unknown Artist',
+        album: 'JamRoom',
+        artwork: track.artworkUrl
+          ? [
+            { src: track.artworkUrl.replace('-large', '-t200x200'), sizes: '200x200', type: 'image/jpeg' },
+            { src: track.artworkUrl.replace('-large', '-t500x500'), sizes: '500x500', type: 'image/jpeg' },
+          ]
+          : [],
+      });
+    }
+
+    navigator.mediaSession.setActionHandler('play', () => {
+      if (!canControlRef.current) return;
+      widgetRef.current?.play();
+      if (onPlayPause) onPlayPause('playing', position);
+    });
+    navigator.mediaSession.setActionHandler('pause', () => {
+      if (!canControlRef.current) return;
+      widgetRef.current?.pause();
+      if (onPlayPause) onPlayPause('paused', position);
+    });
+    navigator.mediaSession.setActionHandler('nexttrack', () => {
+      if (canControlRef.current && onSkipRef.current) onSkipRef.current();
+    });
+
+    return () => {
+      try {
+        navigator.mediaSession.setActionHandler('play', null);
+        navigator.mediaSession.setActionHandler('pause', null);
+        navigator.mediaSession.setActionHandler('nexttrack', null);
+      } catch (_) { }
+    };
+  }, [currentItem, onPlayPause]); // eslint-disable-line
+
+  // 6. Resume playback when returning from background (mobile browsers pause iframe audio)
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      const widget = widgetRef.current;
+      if (!widget) return;
+      // If room says playing but widget is paused, resume
+      const ps = playbackStateRef.current;
+      if (ps?.state === 'playing') {
+        // Small delay to let the iframe wake up
+        setTimeout(() => {
+          widget.play();
+          widget.setVolume(isMutedRef.current ? 0 : volumeRef.current);
+        }, 300);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, []);
 
   const handlePlayPause = () => {
     const widget = widgetRef.current;

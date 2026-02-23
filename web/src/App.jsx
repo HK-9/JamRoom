@@ -15,8 +15,10 @@ import SearchPanel from './components/SearchPanel';
 import QueuePanel from './components/QueuePanel';
 import ChatPanel from './components/ChatPanel';
 import PlayerBar from './components/PlayerBar';
+import InstallPrompt from './components/InstallPrompt';
 import useSocket from './hooks/useSocket';
 import useSearch from './hooks/useSearch';
+import useNotifications from './hooks/useNotifications';
 
 const { Title, Text } = Typography;
 
@@ -39,12 +41,14 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('search');
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  const { notify } = useNotifications();
+
   const {
     connected, roomState, chatMessages, error, mySocketId,
     isHost, canControl, lobbyRooms,
     createRoom, joinRoom, addToQueue, skipTrack, playTrack, removeFromQueue,
     updatePlayback, sendChat, setPermissions
-  } = useSocket();
+  } = useSocket(notify);
 
   const { results, loading, error: searchError, search } = useSearch();
 
@@ -126,6 +130,7 @@ export default function App() {
     return (
       <ConfigProvider theme={antTheme}>
         <div className="join-screen">
+          <InstallPrompt />
           <div className="w-full max-w-sm mx-4">
             <div className="text-center mb-6">
               <SoundOutlined className="text-5xl text-blue-500" />
@@ -167,6 +172,7 @@ export default function App() {
     return (
       <ConfigProvider theme={antTheme}>
         <>
+          <InstallPrompt />
           <LobbyScreen
             lobbyRooms={lobbyRooms}
             loading={!connected}
@@ -293,6 +299,7 @@ export default function App() {
   return (
     <ConfigProvider theme={antTheme}>
       <div className="flex flex-col h-dvh bg-[#141414]">
+        <InstallPrompt />
 
         {/* Header */}
         <header className="safe-top flex items-center justify-between px-3 sm:px-6 h-12 sm:h-14 bg-[#1f1f1f] border-b border-[#303030] shrink-0">
