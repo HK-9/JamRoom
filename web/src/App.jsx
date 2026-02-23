@@ -296,25 +296,30 @@ export default function App() {
 
         {/* Header */}
         <header className="safe-top flex items-center justify-between px-3 sm:px-6 h-12 sm:h-14 bg-[#1f1f1f] border-b border-[#303030] shrink-0">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 sm:gap-2 min-w-0">
             <Button
               type="text"
-              className="md:!hidden"
+              className="md:!hidden !px-1.5"
               icon={<MenuOutlined style={{ color: '#fff', fontSize: 18 }} />}
               onClick={() => setDrawerOpen(true)}
             />
-            <SoundOutlined className="text-blue-500 text-lg" />
-            <span className="text-white font-bold text-base sm:text-lg">JamRoom</span>
-            <Tag color="blue" className="hidden sm:inline-flex max-w-[120px] truncate">
+            <SoundOutlined className="text-blue-500 text-lg hidden sm:block" />
+            <span className="text-white font-bold text-sm sm:text-lg truncate">JamRoom</span>
+            <Tag color="blue" className="hidden md:inline-flex max-w-[120px] truncate">
               {roomState?.name || roomId}
             </Tag>
           </div>
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            {isHost && <Tag icon={<CrownOutlined />} color="gold" className="!text-xs">Host</Tag>}
-            <Tag color={connected ? 'green' : 'red'} className="!text-xs">
-              {connected ? '●' : '○'}<span className="hidden sm:inline"> {connected ? 'Live' : 'Offline'}</span>
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+            {isHost && (
+              <Tag color="gold" className="!text-[10px] sm:!text-xs !mx-0 !px-1 sm:!px-2">
+                <CrownOutlined />
+                <span className="hidden sm:inline ml-1">Host</span>
+              </Tag>
+            )}
+            <Tag color={connected ? 'green' : 'red'} className="!text-[10px] sm:!text-xs !mx-0 !px-1 sm:!px-2">
+              {connected ? '●' : '○'}<span className="hidden sm:inline ml-1">{connected ? 'Live' : 'Offline'}</span>
             </Tag>
-            <span className="text-gray-400 text-xs sm:text-sm truncate max-w-[60px] sm:max-w-none">{userName}</span>
+            <span className="text-gray-400 text-xs sm:text-sm truncate max-w-[60px] sm:max-w-none pl-1">{userName}</span>
           </div>
         </header>
 
