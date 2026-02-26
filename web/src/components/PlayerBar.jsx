@@ -85,10 +85,19 @@ export default function PlayerBar({
           widget.getDuration((d) => { if (d > 0) setDuration(d); });
           widget.setVolume(isMutedRef.current ? 0 : volumeRef.current);
           setIsLoading(false);
-          // Auto-play if room says playing (handles initial join + track switch)
+          // Auto-play + seek to correct position (handles initial join + track switch)
           const ps = playbackStateRef.current;
           if (ps?.state === 'playing') {
+            // Compensate for time elapsed between server snapshot and widget ready
+            const elapsed = Date.now() - (ps.updatedAt || Date.now());
+            const seekTarget = (ps.positionMs || 0) + elapsed;
             widget.play();
+            if (seekTarget > 2000) {
+              widget.seekTo(seekTarget);
+            }
+          } else if (ps?.positionMs > 2000) {
+            // Paused mid-song — seek to the paused position
+            widget.seekTo(ps.positionMs);
           }
         });
         widget.bind(E.PLAY, () => { setIsPlaying(true); setIsLoading(false); });

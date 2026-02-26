@@ -91,6 +91,20 @@ function makeRoom(roomId, name, passwordHash, hostId) {
   };
 }
 
+/* Compute real-time playback position (extrapolate elapsed time while playing) */
+function computePlaybackSnapshot(playback) {
+  if (!playback || playback.state !== 'playing' || !playback.trackId) {
+    return playback;
+  }
+  const now = Date.now();
+  const elapsed = now - (playback.updatedAt || now);
+  return {
+    ...playback,
+    positionMs: (playback.positionMs || 0) + elapsed,
+    updatedAt: now
+  };
+}
+
 function serializeRoom(room) {
   return {
     roomId: room.roomId,
@@ -101,7 +115,7 @@ function serializeRoom(room) {
     users: Array.from(room.users.entries()).map(([socketId, u]) => ({ socketId, ...u })),
     queue: room.queue,
     chat: room.chat,
-    playback: room.playback
+    playback: computePlaybackSnapshot(room.playback)
   };
 }
 
