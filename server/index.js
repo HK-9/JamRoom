@@ -201,6 +201,38 @@ app.get('/api/resolve/:trackId', async (req, res) => {
   }
 });
 
+// SoundCloud direct stream URL (for native <audio> playback)
+app.get('/api/stream/:trackId', async (req, res) => {
+  const trackId = sanitize(req.params.trackId, 50);
+  if (!trackId) return res.status(400).json({ error: 'Invalid trackId' });
+  const clientId = await getPublicClientId();
+  if (!clientId) return res.status(503).json({ error: 'SoundCloud unavailable.' });
+
+  try {
+    const { data } = await axios.get(`https://api-v2.soundcloud.com/tracks/${trackId}`, {
+      params: { client_id: clientId }, headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 10000
+    });
+
+    const transcodings = data.media?.transcodings || [];
+    // Prefer progressive (direct MP3), fall back to any available
+    const progressive = transcodings.find(t => t.format?.protocol === 'progressive');
+    const transcoding = progressive || transcodings[0];
+    if (!transcoding) {
+      return res.status(404).json({ error: 'No streaming available for this track.' });
+    }
+
+    // Resolve transcoding URL → actual CDN stream URL
+    const streamRes = await axios.get(transcoding.url, {
+      params: { client_id: clientId },
+      headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 10000
+    });
+
+    return res.json({ url: streamRes.data.url });
+  } catch (err) {
+    return res.status(500).json({ error: 'Stream failed', detail: err.message });
+  }
+});
+
 /* ─── Chat rate limiter ─── */
 const chatRateLimits = new Map();
 function checkChatRate(socketId) {

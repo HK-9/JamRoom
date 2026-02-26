@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Slider, Button, Typography, Avatar, Spin } from 'antd';
 import {
   CaretRightOutlined,
@@ -10,7 +10,7 @@ import {
 } from '@ant-design/icons';
 
 const { Text } = Typography;
-const SC_WIDGET_URL = 'https://w.soundcloud.com/player/?url=';
+const API_BASE = import.meta.env.VITE_SERVER_URL || '';
 
 export default function PlayerBar({
   currentItem,
@@ -21,105 +21,180 @@ export default function PlayerBar({
   onSkip,
   onPositionUpdate
 }) {
-  const iframeRef = useRef(null);
-  const widgetRef = useRef(null);
+  const audioRef = useRef(null);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(80);
   const [isMuted, setIsMuted] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);        // ← new
-  const [scApiReady, setScApiReady] = useState(!!window.SC?.Widget);
-  const loadedUrlRef = useRef(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [needsInteraction, setNeedsInteraction] = useState(false);
+
+  const loadedTrackIdRef = useRef(null);
+  const isLoadingRef = useRef(false);
   const canControlRef = useRef(canControl);
   const onSkipRef = useRef(onSkip);
-  const volumeRef = useRef(volume);
-  const isMutedRef = useRef(isMuted);
   const playbackStateRef = useRef(playbackState);
-  const isPlayingRef = useRef(isPlaying);
+  const streamCacheRef = useRef(new Map());
 
   useEffect(() => { canControlRef.current = canControl; }, [canControl]);
   useEffect(() => { onSkipRef.current = onSkip; }, [onSkip]);
-  useEffect(() => { volumeRef.current = volume; }, [volume]);
-  useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
   useEffect(() => { playbackStateRef.current = playbackState; }, [playbackState]);
-  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
 
-  // 1. Load SC Widget API
+  // ── Audio event listeners (bound once) ──────────────────────────────────
   useEffect(() => {
-    if (window.SC?.Widget) { setScApiReady(true); return; }
-    const s = document.createElement('script');
-    s.src = 'https://w.soundcloud.com/player/api.js';
-    s.async = true;
-    s.onload = () => setScApiReady(true);
-    document.head.appendChild(s);
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const onPlay = () => { setIsPlaying(true); setNeedsInteraction(false); };
+    const onPause = () => {
+      // Only set paused if we're not in the middle of loading a new track
+      if (!isLoadingRef.current) setIsPlaying(false);
+    };
+    const onTimeUpdate = () => setPosition(audio.currentTime * 1000);
+    const onEnded = () => {
+      setIsPlaying(false);
+      if (canControlRef.current && onSkipRef.current) onSkipRef.current();
+    };
+    const onDurationChange = () => {
+      if (audio.duration && isFinite(audio.duration)) {
+        setDuration(audio.duration * 1000);
+      }
+    };
+
+    audio.addEventListener('play', onPlay);
+    audio.addEventListener('pause', onPause);
+    audio.addEventListener('timeupdate', onTimeUpdate);
+    audio.addEventListener('ended', onEnded);
+    audio.addEventListener('durationchange', onDurationChange);
+
+    return () => {
+      audio.removeEventListener('play', onPlay);
+      audio.removeEventListener('pause', onPause);
+      audio.removeEventListener('timeupdate', onTimeUpdate);
+      audio.removeEventListener('ended', onEnded);
+      audio.removeEventListener('durationchange', onDurationChange);
+    };
   }, []);
 
-  // 2. Load track ONLY when the permalink URL actually changes
-  const currentUrl = currentItem?.track?.permalinkUrl;
+  // ── Volume sync ─────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!scApiReady || !iframeRef.current || !currentUrl) return;
-    if (loadedUrlRef.current === currentUrl) return;      // ← same track, skip
-    loadedUrlRef.current = currentUrl;
+    if (audioRef.current) audioRef.current.volume = isMuted ? 0 : volume / 100;
+  }, [volume, isMuted]);
 
+  // ── Load track when currentItem changes ─────────────────────────────────
+  const currentTrackId = currentItem?.track?.trackId;
+
+  useEffect(() => {
+    if (!currentTrackId) return;
+    if (loadedTrackIdRef.current === currentTrackId) return;
+    loadedTrackIdRef.current = currentTrackId;
+
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    setIsLoading(true);
+    isLoadingRef.current = true;
     setPosition(0);
     setDuration(0);
     setIsPlaying(false);
-    setIsLoading(true);                                    // ← show spinner
+    setNeedsInteraction(false);
 
-    const widget = widgetRef.current || window.SC.Widget(iframeRef.current);
-    widgetRef.current = widget;
-    const E = window.SC.Widget.Events;
+    // Check stream URL cache
+    const cached = streamCacheRef.current.get(currentTrackId);
+    if (cached) {
+      startAudio(audio, cached);
+      return;
+    }
 
-    try {
-      widget.unbind(E.READY); widget.unbind(E.PLAY); widget.unbind(E.PAUSE);
-      widget.unbind(E.PLAY_PROGRESS); widget.unbind(E.FINISH);
-    } catch (_) { }
+    // Resolve stream URL from server
+    fetch(`${API_BASE}/api/stream/${currentTrackId}`)
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then(data => {
+        if (!data.url) throw new Error('No stream URL returned');
+        streamCacheRef.current.set(currentTrackId, data.url);
+        // Only load if this is still the current track
+        if (loadedTrackIdRef.current === currentTrackId) {
+          startAudio(audio, data.url);
+        }
+      })
+      .catch(err => {
+        console.error('Stream resolution failed:', err);
+        setIsLoading(false);
+        isLoadingRef.current = false;
+      });
+  }, [currentTrackId]); // eslint-disable-line
 
-    widget.load(currentUrl, {
-      auto_play: true, show_artwork: false, show_user: false,
-      buying: false, sharing: false, download: false,
-      show_playcount: false, show_comments: false,
-      callback: () => {
-        widget.bind(E.READY, () => {
-          widget.getDuration((d) => { if (d > 0) setDuration(d); });
-          widget.setVolume(isMutedRef.current ? 0 : volumeRef.current);
-          setIsLoading(false);
-          // Auto-play + seek to correct position (handles initial join + track switch)
-          const ps = playbackStateRef.current;
-          if (ps?.state === 'playing') {
-            // Compensate for time elapsed between server snapshot and widget ready
-            const elapsed = Date.now() - (ps.updatedAt || Date.now());
-            const seekTarget = (ps.positionMs || 0) + elapsed;
-            widget.play();
-            if (seekTarget > 2000) {
-              widget.seekTo(seekTarget);
-            }
-          } else if (ps?.positionMs > 2000) {
-            // Paused mid-song — seek to the paused position
-            widget.seekTo(ps.positionMs);
-          }
-        });
-        widget.bind(E.PLAY, () => { setIsPlaying(true); setIsLoading(false); });
-        widget.bind(E.PAUSE, () => setIsPlaying(false));
-        widget.bind(E.PLAY_PROGRESS, (e) => setPosition(e.currentPosition));
-        widget.bind(E.FINISH, () => {
-          setIsPlaying(false);
-          if (canControlRef.current && onSkipRef.current) onSkipRef.current();
-        });
-        widget.getDuration((d) => { if (d > 0) setDuration(d); });
-        widget.setVolume(isMutedRef.current ? 0 : volumeRef.current);
-        widget.play();
+  // ── Start audio with URL, seek to correct position, and auto-play ──────
+  const startAudio = useCallback((audio, url) => {
+    audio.src = url;
+    audio.load();
+
+    const ps = playbackStateRef.current;
+
+    const onCanPlay = () => {
+      audio.removeEventListener('canplay', onCanPlay);
+
+      if (audio.duration && isFinite(audio.duration)) {
+        setDuration(audio.duration * 1000);
       }
-    });
-  }, [scApiReady, currentUrl]);    // ← depends on URL string, not object ref
 
-  // 3. Sync ONLY from player:sync events (not room:state)
-  //    playbackState changes come from both room:state & player:sync,
-  //    but we only care when the actual values change.
+      // Seek to correct position
+      if (ps?.positionMs > 0) {
+        const elapsed = ps.state === 'playing'
+          ? Date.now() - (ps.updatedAt || Date.now())
+          : 0;
+        const seekSec = Math.min(
+          ((ps.positionMs || 0) + elapsed) / 1000,
+          audio.duration || Infinity
+        );
+        if (seekSec > 1) audio.currentTime = seekSec;
+      }
+
+      // Auto-play if room says playing
+      if (ps?.state === 'playing') {
+        const playPromise = audio.play();
+        if (playPromise) {
+          playPromise
+            .then(() => {
+              setIsLoading(false);
+              isLoadingRef.current = false;
+            })
+            .catch(() => {
+              // Browser blocked autoplay — show "Tap to sync"
+              setNeedsInteraction(true);
+              setIsLoading(false);
+              isLoadingRef.current = false;
+            });
+        } else {
+          setIsLoading(false);
+          isLoadingRef.current = false;
+        }
+      } else {
+        setIsLoading(false);
+        isLoadingRef.current = false;
+      }
+    };
+
+    audio.addEventListener('canplay', onCanPlay, { once: true });
+  }, []);
+
+  // ── Sync play/pause/seek from server — skip while loading ──────────────
   const lastSyncRef = useRef({ trackId: null, state: null, positionMs: 0, updatedAt: 0 });
+
   useEffect(() => {
-    if (!playbackState || !widgetRef.current) return;
+    const audio = audioRef.current;
+    if (!playbackState || !audio) return;
+
+    // Don't interfere while loading
+    if (isLoadingRef.current) {
+      lastSyncRef.current = { ...playbackState };
+      return;
+    }
+
     const prev = lastSyncRef.current;
 
     // Ignore if nothing meaningful changed
@@ -131,25 +206,24 @@ export default function PlayerBar({
 
     lastSyncRef.current = { ...playbackState };
 
-    // If the track changed, the load effect above handles it (auto_play + READY handler)
+    // If track changed, the load effect handles it
     if (prev.trackId !== playbackState.trackId) return;
 
     // Same track — sync play/pause/seek
-    const widget = widgetRef.current;
     if (playbackState.state === 'playing') {
-      widget.play();
-      if (Math.abs((playbackState.positionMs || 0) - position) > 2000) {
-        widget.seekTo(playbackState.positionMs || 0);
+      const playPromise = audio.play();
+      if (playPromise) playPromise.catch(() => setNeedsInteraction(true));
+
+      const serverPos = playbackState.positionMs || 0;
+      if (Math.abs(serverPos - position) > 2000) {
+        audio.currentTime = serverPos / 1000;
       }
     } else {
-      widget.pause();
+      audio.pause();
     }
   }, [playbackState]); // eslint-disable-line
 
-  // 4. Volume sync
-  useEffect(() => { widgetRef.current?.setVolume(isMuted ? 0 : volume); }, [volume, isMuted]);
-
-  // 5. Media Session API — lock screen / notification shade controls
+  // ── Media Session API (lock screen / notification shade) ────────────────
   useEffect(() => {
     if (!('mediaSession' in navigator)) return;
     const track = currentItem?.track;
@@ -169,12 +243,12 @@ export default function PlayerBar({
 
     navigator.mediaSession.setActionHandler('play', () => {
       if (!canControlRef.current) return;
-      widgetRef.current?.play();
+      audioRef.current?.play();
       if (onPlayPause) onPlayPause('playing', position);
     });
     navigator.mediaSession.setActionHandler('pause', () => {
       if (!canControlRef.current) return;
-      widgetRef.current?.pause();
+      audioRef.current?.pause();
       if (onPlayPause) onPlayPause('paused', position);
     });
     navigator.mediaSession.setActionHandler('nexttrack', () => {
@@ -190,19 +264,16 @@ export default function PlayerBar({
     };
   }, [currentItem, onPlayPause]); // eslint-disable-line
 
-  // 6. Resume playback when returning from background (mobile browsers pause iframe audio)
+  // ── Resume playback when returning from background ──────────────────────
   useEffect(() => {
     const handleVisibility = () => {
       if (document.visibilityState !== 'visible') return;
-      const widget = widgetRef.current;
-      if (!widget) return;
-      // If room says playing but widget is paused, resume
+      const audio = audioRef.current;
+      if (!audio) return;
       const ps = playbackStateRef.current;
-      if (ps?.state === 'playing') {
-        // Small delay to let the iframe wake up
+      if (ps?.state === 'playing' && audio.paused) {
         setTimeout(() => {
-          widget.play();
-          widget.setVolume(isMutedRef.current ? 0 : volumeRef.current);
+          audio.play().catch(() => { });
         }, 300);
       }
     };
@@ -210,16 +281,33 @@ export default function PlayerBar({
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, []);
 
+  // ── Handlers ────────────────────────────────────────────────────────────
   const handlePlayPause = () => {
-    const widget = widgetRef.current;
-    if (!widget || !canControl || isLoading) return;
-    if (isPlaying) widget.pause(); else widget.play();
+    const audio = audioRef.current;
+    if (!audio || !canControl || isLoading) return;
+    if (isPlaying) audio.pause(); else audio.play().catch(() => { });
     if (onPlayPause) onPlayPause(isPlaying ? 'paused' : 'playing', position);
+  };
+
+  const handleTapToSync = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const ps = playbackStateRef.current;
+
+    audio.play().then(() => {
+      setNeedsInteraction(false);
+      // Sync position after play succeeds
+      if (ps?.positionMs > 0 && ps.state === 'playing') {
+        const elapsed = Date.now() - (ps.updatedAt || Date.now());
+        audio.currentTime = ((ps.positionMs + elapsed) / 1000);
+      }
+    }).catch(() => { });
   };
 
   const handleSeek = (val) => {
     if (!canControl || isLoading) return;
-    widgetRef.current?.seekTo(val);
+    const audio = audioRef.current;
+    if (audio) audio.currentTime = val / 1000;
     setPosition(val);
     if (onPositionUpdate) onPositionUpdate('playing', val);
   };
@@ -232,13 +320,8 @@ export default function PlayerBar({
 
   return (
     <div className="safe-bottom bg-[#1a1a2e] border-t border-[#303030] px-2 sm:px-4 lg:px-6 flex items-center h-16 sm:h-20 gap-2 sm:gap-4 shrink-0">
-      <iframe
-        ref={iframeRef}
-        className="sc-widget-hidden"
-        allow="autoplay"
-        src={`${SC_WIDGET_URL}https%3A//soundcloud.com&auto_play=false`}
-        title="SoundCloud Player"
-      />
+      {/* Hidden native audio element — replaces SoundCloud widget iframe */}
+      <audio ref={audioRef} preload="auto" style={{ display: 'none' }} />
 
       {/* Track info */}
       <div className="flex items-center gap-2 sm:gap-3 min-w-0 shrink-0 sm:w-44 lg:w-56">
@@ -255,7 +338,18 @@ export default function PlayerBar({
 
       {/* Controls */}
       <div className="flex items-center gap-1 shrink-0">
-        {isLoading ? (
+        {needsInteraction ? (
+          <Button
+            type="primary"
+            shape="round"
+            size="large"
+            icon={<CaretRightOutlined />}
+            onClick={handleTapToSync}
+            className="!animate-pulse"
+          >
+            Tap to sync
+          </Button>
+        ) : isLoading ? (
           <div className="w-10 h-10 flex items-center justify-center">
             <Spin indicator={loadingIcon} />
           </div>
